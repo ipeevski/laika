@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def call_llm(summary_text: str, choice: Optional[str]) -> dict:
+def call_llm(summary_text: str, choice: Optional[str], initial_idea: Optional[str] = None) -> dict:
     system_prompt = (
         "You are a creative writer helping the user craft a choose-your-own-adventure book. "
         "Respond strictly in valid JSON with the following keys: \n"
@@ -33,7 +33,10 @@ def call_llm(summary_text: str, choice: Optional[str]) -> dict:
         prompt += f"Book summary so far:\n{summary_text.strip()}\n"
 
     if choice is None:
-        prompt += "Let's begin the story. Generate the first page."
+        if initial_idea:
+            prompt += f"Let's begin the story based on this idea: {initial_idea}\n\nGenerate the first page."
+        else:
+            prompt += "Let's begin the story. Generate the first page."
     else:
         prompt += f"Continue the story following the reader's choice: '{choice}'."
 
@@ -70,6 +73,7 @@ class ChatResponse(BaseModel):
 
 class CreateBookRequest(BaseModel):
     title: Optional[str] = None
+    idea: Optional[str] = None
 
 
 class UpdateTitleRequest(BaseModel):
@@ -81,7 +85,13 @@ async def chat_endpoint(req: ChatRequest):
     book_id = req.book_id or str(uuid.uuid4())
     book = Book(book_id)
     summary_text = book.get_summary()
-    data = call_llm(summary_text, req.choice)
+
+    # Get initial idea if this is the first page (no summary yet)
+    initial_idea = None
+    if not summary_text.strip() and req.choice is None:
+        initial_idea = book.metadata.settings.get("initial_idea")
+
+    data = call_llm(summary_text, req.choice, initial_idea)
 
     page = data.get("page", "")
     choices = data.get("choices", [])[:3]
@@ -100,6 +110,8 @@ async def list_books_endpoint():
 @app.post("/api/books", response_model=BookInfo)
 async def create_book_endpoint(req: CreateBookRequest):
     book = BookManager.create_book(req.title)
+    if req.idea:
+        book.update_setting("initial_idea", req.idea)
     return book.get_info()
 
 @app.get("/api/books/{book_id}", response_model=BookInfo)

@@ -10,7 +10,74 @@ function Spinner() {
   )
 }
 
-function WelcomeScreen({ onStartNew, onContinueExisting, books, loading }) {
+function BookManager({
+  showCreateBook,
+  setShowCreateBook,
+  newBookTitle,
+  setNewBookTitle,
+  newBookIdea,
+  setNewBookIdea,
+  onCreateBook
+}) {
+  return (
+    <>
+      {/* Create Book Modal */}
+      {showCreateBook && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Create New Book</h3>
+            <input
+              type="text"
+              value={newBookTitle}
+              onChange={(e) => setNewBookTitle(e.target.value)}
+              placeholder="Enter book title (optional)"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onCreateBook(newBookTitle || null, newBookIdea || null)
+                } else if (e.key === 'Escape') {
+                  setShowCreateBook(false)
+                  setNewBookTitle('')
+                  setNewBookIdea('')
+                }
+              }}
+              autoFocus
+            />
+            <textarea
+              value={newBookIdea}
+              onChange={(e) => setNewBookIdea(e.target.value)}
+              placeholder="Enter a brief description or idea for your book (optional)"
+              rows="4"
+              cols="50"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onCreateBook(newBookTitle || null, newBookIdea || null)
+                } else if (e.key === 'Escape') {
+                  setShowCreateBook(false)
+                  setNewBookTitle('')
+                  setNewBookIdea('')
+                }
+              }}
+            />
+            <div className="modal-buttons">
+              <button onClick={() => onCreateBook(newBookTitle || null, newBookIdea || null)}>
+                Create
+              </button>
+              <button onClick={() => {
+                setShowCreateBook(false)
+                setNewBookTitle('')
+                setNewBookIdea('')
+              }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
+function WelcomeScreen({ onStartNew, onContinueExisting, books, loading, onLoadBook }) {
   return (
     <div className="welcome-screen">
       <div className="welcome-content">
@@ -50,7 +117,11 @@ function WelcomeScreen({ onStartNew, onContinueExisting, books, loading }) {
             <h3>Recent Books</h3>
             <div className="recent-books-list">
               {books.slice(0, 3).map(book => (
-                <div key={book.id} className="recent-book-item">
+                <div
+                  key={book.id}
+                  className="recent-book-item"
+                  onClick={() => onLoadBook(book.id)}
+                >
                   <div className="recent-book-title">{book.title}</div>
                   <div className="recent-book-info">
                     {book.num_pages} pages • Updated {new Date(book.updated_at).toLocaleDateString()}
@@ -78,8 +149,11 @@ export default function App() {
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [showCreateBook, setShowCreateBook] = useState(false)
   const [newBookTitle, setNewBookTitle] = useState('')
+  const [newBookIdea, setNewBookIdea] = useState('')
   const [showWelcome, setShowWelcome] = useState(true)
   const [initialLoading, setInitialLoading] = useState(true)
+  const [showEditTitle, setShowEditTitle] = useState(false)
+  const [editingTitle, setEditingTitle] = useState('')
 
   async function loadBooks() {
     try {
@@ -95,12 +169,12 @@ export default function App() {
     }
   }
 
-  async function createBook(title = null) {
+  async function createBook(title = null, idea = null) {
     try {
       const res = await fetch(`${API_BASE}/api/books`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
+        body: JSON.stringify({ title, idea }),
       })
       if (res.ok) {
         const newBook = await res.json()
@@ -109,6 +183,7 @@ export default function App() {
         setCurrentBookTitle(newBook.title)
         setShowCreateBook(false)
         setNewBookTitle('')
+        setNewBookIdea('')
         setShowWelcome(false)
         // Start the new book
         await sendChoice(null, newBook.id)
@@ -117,6 +192,42 @@ export default function App() {
       console.error('Failed to create book:', err)
       alert('Error creating book')
     }
+  }
+
+  async function updateBookTitle(bookId, newTitle) {
+    try {
+      const res = await fetch(`${API_BASE}/api/books/${bookId}/title`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title: newTitle }),
+      })
+      if (res.ok) {
+        // Update local state
+        setBooks(prev => prev.map(book =>
+          book.id === bookId
+            ? { ...book, title: newTitle }
+            : book
+        ))
+
+        // Update current book title if it's the one being edited
+        if (bookId === currentBookId) {
+          setCurrentBookTitle(newTitle)
+        }
+
+        setShowEditTitle(false)
+        setEditingTitle('')
+      } else {
+        throw new Error('Failed to update title')
+      }
+    } catch (err) {
+      console.error('Failed to update book title:', err)
+      alert('Error updating book title')
+    }
+  }
+
+  function handleEditTitle() {
+    setEditingTitle(currentBookTitle)
+    setShowEditTitle(true)
   }
 
   async function loadBook(bookId) {
@@ -253,12 +364,24 @@ export default function App() {
   // Show welcome screen until user makes a choice
   if (showWelcome) {
     return (
-      <WelcomeScreen
-        onStartNew={handleStartNew}
-        onContinueExisting={handleContinueExisting}
-        books={books}
-        loading={initialLoading}
-      />
+      <>
+        <WelcomeScreen
+          onStartNew={handleStartNew}
+          onContinueExisting={handleContinueExisting}
+          books={books}
+          loading={initialLoading}
+          onLoadBook={loadBook}
+        />
+        <BookManager
+          showCreateBook={showCreateBook}
+          setShowCreateBook={setShowCreateBook}
+          newBookTitle={newBookTitle}
+          setNewBookTitle={setNewBookTitle}
+          newBookIdea={newBookIdea}
+          setNewBookIdea={setNewBookIdea}
+          onCreateBook={createBook}
+        />
+      </>
     )
   }
 
@@ -271,149 +394,172 @@ export default function App() {
   }
 
   return (
-    <div className="layout">
-      <aside className="sidebar">
-        <div className="book-selector">
-          <button
-            onClick={() => setShowBookSelector(!showBookSelector)}
-            className="book-selector-button"
-          >
-            📚 {currentBookTitle || 'Select Book'}
-          </button>
+    <>
+      <div className="layout">
+        <aside className="sidebar">
+          <div className="book-selector">
+            <button
+              onClick={() => setShowBookSelector(!showBookSelector)}
+              className="book-selector-button"
+            >
+              📚 {currentBookTitle || 'Select Book'}
+            </button>
 
-          {showBookSelector && (
-            <div className="book-list">
-              {books.map(book => (
-                <div
-                  key={book.id}
-                  className={`book-item ${book.id === currentBookId ? 'active' : ''}`}
-                  onClick={() => loadBook(book.id)}
+            {showBookSelector && (
+              <div className="book-list">
+                {books.map(book => (
+                  <div
+                    key={book.id}
+                    className={`book-item ${book.id === currentBookId ? 'active' : ''}`}
+                    onClick={() => loadBook(book.id)}
+                  >
+                    <div className="book-title">{book.title}</div>
+                    <div className="book-info">{book.num_pages} pages</div>
+                  </div>
+                ))}
+                <button
+                  onClick={handleStartNew}
+                  className="create-book-button"
                 >
-                  <div className="book-title">{book.title}</div>
-                  <div className="book-info">{book.num_pages} pages</div>
-                </div>
-              ))}
-              <button
-                onClick={() => setShowCreateBook(true)}
-                className="create-book-button"
-              >
-                + New Book
-              </button>
-            </div>
-          )}
-        </div>
-
-        <ul className="page-list">
-          {pages.map((_, idx) => (
-            <li
-              key={idx}
-              className={idx === currentIndex ? 'active' : ''}
-              onClick={() => setCurrentIndex(idx)}
-            >
-              Page {idx + 1}
-            </li>
-          ))}
-        </ul>
-      </aside>
-
-      <div className="container">
-        <h1 className="title">{currentBookTitle || 'Book'}</h1>
-
-        {currentIndex >= 0 && pages[currentIndex] && (
-          <div className="page">
-            {pages[currentIndex].image && (
-              <img src={pages[currentIndex].image} alt="illustration" />
+                  + New Book
+                </button>
+              </div>
             )}
-            <p>{pages[currentIndex].text}</p>
           </div>
-        )}
 
-        {loading && <Spinner />}
+          <ul className="page-list">
+            {pages.map((_, idx) => (
+              <li
+                key={idx}
+                className={idx === currentIndex ? 'active' : ''}
+                onClick={() => setCurrentIndex(idx)}
+              >
+                Page {idx + 1}
+              </li>
+            ))}
+          </ul>
+        </aside>
 
-        <div className="nav-buttons">
-          <button onClick={goPrev} disabled={currentIndex <= 0}>
-            Prev
-          </button>
-          <button onClick={goNext} disabled={currentIndex >= pages.length - 1}>
-            Next
-          </button>
-        </div>
-
-        <div className="choices">
-          {choices.map((choice, index) => (
-            <button
-              key={index}
-              disabled={loading}
-              onClick={() => handleChoiceClick(choice)}
-              className={`choice-button ${showCustomInput ? 'choice-button-custom-mode' : ''}`}
-            >
-              {choice}
-            </button>
-          ))}
-
-          {showCustomInput ? (
-            <div className="custom-choice">
-              <input
-                type="text"
-                value={customChoice}
-                onChange={(e) => setCustomChoice(e.target.value)}
-                placeholder="Enter your own choice..."
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleCustomChoiceSubmit()
-                  }
-                }}
-                autoFocus
-              />
-              <button onClick={handleCustomChoiceSubmit} disabled={!customChoice.trim()}>
-                Submit
+        <div className="container">
+          <div className="title-container">
+            <h1 className="title">{currentBookTitle || 'Book'}</h1>
+            {currentBookId && (
+              <button
+                onClick={handleEditTitle}
+                className="edit-title-button"
+                title="Edit book title"
+              >
+                ✏️
               </button>
-              <button onClick={() => {
-                setShowCustomInput(false)
-                setCustomChoice('')
-              }}>
-                Cancel
-              </button>
+            )}
+          </div>
+
+          {currentIndex >= 0 && pages[currentIndex] && (
+            <div className="page">
+              {pages[currentIndex].image && (
+                <img src={pages[currentIndex].image} alt="illustration" />
+              )}
+              <p>{pages[currentIndex].text}</p>
             </div>
-          ) : (
-            <button
-              onClick={() => setShowCustomInput(true)}
-              className="add-custom-choice"
-              disabled={loading}
-            >
-              + Add Custom Choice
-            </button>
           )}
+
+          {loading && <Spinner />}
+
+          <div className="nav-buttons">
+            <button onClick={goPrev} disabled={currentIndex <= 0}>
+              Prev
+            </button>
+            <button onClick={goNext} disabled={currentIndex >= pages.length - 1}>
+              Next
+            </button>
+          </div>
+
+          <div className="choices">
+            {choices.map((choice, index) => (
+              <button
+                key={index}
+                disabled={loading}
+                onClick={() => handleChoiceClick(choice)}
+                className={`choice-button ${showCustomInput ? 'choice-button-custom-mode' : ''}`}
+              >
+                {choice}
+              </button>
+            ))}
+
+            {showCustomInput ? (
+              <div className="custom-choice">
+                <input
+                  type="text"
+                  value={customChoice}
+                  onChange={(e) => setCustomChoice(e.target.value)}
+                  placeholder="Enter your own choice..."
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleCustomChoiceSubmit()
+                    }
+                  }}
+                  autoFocus
+                />
+                <button onClick={handleCustomChoiceSubmit} disabled={!customChoice.trim()}>
+                  Submit
+                </button>
+                <button onClick={() => {
+                  setShowCustomInput(false)
+                  setCustomChoice('')
+                }}>
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowCustomInput(true)}
+                className="add-custom-choice"
+                disabled={loading}
+              >
+                + Add Custom Choice
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Create Book Modal */}
-      {showCreateBook && (
+      <BookManager
+        showCreateBook={showCreateBook}
+        setShowCreateBook={setShowCreateBook}
+        newBookTitle={newBookTitle}
+        setNewBookTitle={setNewBookTitle}
+        newBookIdea={newBookIdea}
+        setNewBookIdea={setNewBookIdea}
+        onCreateBook={createBook}
+      />
+
+      {/* Edit Title Modal */}
+      {showEditTitle && (
         <div className="modal-overlay">
           <div className="modal">
-            <h3>Create New Book</h3>
+            <h3>Edit Book Title</h3>
             <input
               type="text"
-              value={newBookTitle}
-              onChange={(e) => setNewBookTitle(e.target.value)}
-              placeholder="Enter book title (optional)"
+              value={editingTitle}
+              onChange={(e) => setEditingTitle(e.target.value)}
+              placeholder="Enter new book title"
               onKeyDown={(e) => {
                 if (e.key === 'Enter') {
-                  createBook(newBookTitle || null)
+                  updateBookTitle(currentBookId, editingTitle.trim())
                 } else if (e.key === 'Escape') {
-                  setShowCreateBook(false)
-                  setNewBookTitle('')
+                  setShowEditTitle(false)
+                  setEditingTitle('')
                 }
               }}
               autoFocus
             />
             <div className="modal-buttons">
-              <button onClick={() => createBook(newBookTitle || null)}>
-                Create
+              <button onClick={() => updateBookTitle(currentBookId, editingTitle.trim())}>
+                Save
               </button>
               <button onClick={() => {
-                setShowCreateBook(false)
-                setNewBookTitle('')
+                setShowEditTitle(false)
+                setEditingTitle('')
               }}>
                 Cancel
               </button>
@@ -421,6 +567,6 @@ export default function App() {
           </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
