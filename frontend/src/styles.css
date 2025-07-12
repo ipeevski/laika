@@ -1,0 +1,254 @@
+body {
+  margin: 0;
+  padding: 0;
+  background: #f3f4f6;
+  font-family: system-ui, sans-serif;
+}
+
+.container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+.title {
+  font-size: 2rem;
+  font-weight: 700;
+  text-align: center;
+  margin-bottom: 1.5rem;
+}
+
+.page {
+  background: #fff;
+  padding: 1rem;
+  margin-bottom: 1rem;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.page img {
+  width: 100%;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.choices {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.choice-button {
+  padding: 0.75rem 1rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s;
+  text-align: left;
+}
+
+.choice-button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.choice-button-custom-mode {
+  background: #6b7280;
+}
+
+.choice-button-custom-mode:hover:not(:disabled) {
+  background: #4b5563;
+}
+
+.custom-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+  margin-top: 0.5rem;
+}
+
+.custom-choice input {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.custom-choice input:focus {
+  border-color: #2563eb;
+}
+
+.custom-choice button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.2s;
+  min-width: 60px;
+}
+
+.custom-choice button:first-of-type {
+  background: #059669;
+  color: #fff;
+}
+
+.custom-choice button:first-of-type:hover:not(:disabled) {
+  background: #047857;
+}
+
+.custom-choice button:last-of-type {
+  background: #6b7280;
+  color: #fff;
+}
+
+.custom-choice button:last-of-type:hover {
+  background: #4b5563;
+}
+
+.add-custom-choice {
+  padding: 0.75rem 1rem;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s;
+  margin-top: 0.5rem;
+  width: 100%;
+}
+
+.add-custom-choice:hover:not(:disabled) {
+  background: #6d28d9;
+}
+
+@media (min-width: 500px) {
+  .choices {
+    flex-direction: column;
+  }
+}
+
+button {
+  flex: 1;
+  padding: 0.75rem 1rem;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: background 0.2s;
+}
+
+button:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.spinner {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0;
+}
+
+.spinner div {
+  border: 4px solid #f3f3f3;
+  border-top: 4px solid #2563eb;
+  border-radius: 50%;
+  width: 36px;
+  height: 36px;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Sidebar and layout */
+.layout {
+  display: flex;
+  gap: 1rem;
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.sidebar {
+  width: 150px;
+  margin-top: 6rem;
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  padding: 1rem;
+  height: fit-content;
+}
+
+.sidebar ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar li {
+  cursor: pointer;
+  padding: 0.5rem 0.75rem;
+  border-radius: 6px;
+  transition: background 0.2s;
+}
+
+.sidebar li:hover {
+  background: #e5e7eb;
+}
+
+.sidebar li.active {
+  background: #2563eb;
+  color: #fff;
+}
+
+/* Navigation buttons */
+.nav-buttons {
+  display: flex;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+/* Responsive: stack layout on small screens */
+@media (max-width: 600px) {
+  .layout {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 100%;
+    display: flex;
+    overflow-x: auto;
+  }
+
+  .sidebar ul {
+    flex-direction: row;
+  }
+
+  .custom-choice {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
