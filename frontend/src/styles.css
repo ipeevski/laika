@@ -190,7 +190,7 @@ button:disabled {
 }
 
 .sidebar {
-  width: 150px;
+  width: 200px;
   margin-top: 6rem;
   background: #fff;
   border-radius: 8px;
@@ -199,7 +199,86 @@ button:disabled {
   height: fit-content;
 }
 
-.sidebar ul {
+.book-selector {
+  margin-bottom: 1rem;
+}
+
+.book-selector-button {
+  width: 100%;
+  padding: 0.75rem;
+  background: #f8fafc;
+  color: #374151;
+  border: 2px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  text-align: left;
+}
+
+.book-selector-button:hover {
+  background: #f1f5f9;
+  border-color: #d1d5db;
+}
+
+.book-list {
+  margin-top: 0.5rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.book-item {
+  padding: 0.75rem;
+  cursor: pointer;
+  border-bottom: 1px solid #f3f4f6;
+  transition: background 0.2s;
+}
+
+.book-item:last-child {
+  border-bottom: none;
+}
+
+.book-item:hover {
+  background: #f9fafb;
+}
+
+.book-item.active {
+  background: #eff6ff;
+  border-left: 3px solid #2563eb;
+}
+
+.book-title {
+  font-weight: 500;
+  color: #111827;
+  margin-bottom: 0.25rem;
+}
+
+.book-info {
+  font-size: 0.75rem;
+  color: #6b7280;
+}
+
+.create-book-button {
+  width: 100%;
+  padding: 0.75rem;
+  background: #7c3aed;
+  color: #fff;
+  border: none;
+  border-radius: 0;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.2s;
+  margin-top: 0;
+}
+
+.create-book-button:hover {
+  background: #6d28d9;
+}
+
+.page-list {
   list-style: none;
   padding: 0;
   margin: 0;
@@ -208,18 +287,19 @@ button:disabled {
   gap: 0.25rem;
 }
 
-.sidebar li {
+.page-list li {
   cursor: pointer;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   transition: background 0.2s;
+  font-size: 0.875rem;
 }
 
-.sidebar li:hover {
+.page-list li:hover {
   background: #e5e7eb;
 }
 
-.sidebar li.active {
+.page-list li.active {
   background: #2563eb;
   color: #fff;
 }
@@ -229,6 +309,84 @@ button:disabled {
   display: flex;
   gap: 0.5rem;
   margin: 1rem 0;
+}
+
+/* Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal {
+  background: #fff;
+  padding: 2rem;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  min-width: 300px;
+  max-width: 400px;
+}
+
+.modal h3 {
+  margin: 0 0 1rem 0;
+  color: #111827;
+}
+
+.modal input {
+  width: 100%;
+  padding: 0.75rem;
+  border: 2px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 1rem;
+  outline: none;
+  transition: border-color 0.2s;
+  margin-bottom: 1rem;
+  box-sizing: border-box;
+}
+
+.modal input:focus {
+  border-color: #2563eb;
+}
+
+.modal-buttons {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+}
+
+.modal-buttons button {
+  padding: 0.5rem 1rem;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: background 0.2s;
+  min-width: 80px;
+}
+
+.modal-buttons button:first-child {
+  background: #059669;
+  color: #fff;
+}
+
+.modal-buttons button:first-child:hover {
+  background: #047857;
+}
+
+.modal-buttons button:last-child {
+  background: #6b7280;
+  color: #fff;
+}
+
+.modal-buttons button:last-child:hover {
+  background: #4b5563;
 }
 
 /* Responsive: stack layout on small screens */
@@ -243,7 +401,7 @@ button:disabled {
     overflow-x: auto;
   }
 
-  .sidebar ul {
+  .page-list {
     flex-direction: row;
   }
 

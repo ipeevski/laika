@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .agent import Agent
-from .book import BookInfo, BookManager, Book
+from .book import BookInfo, BookManager, Book, BookMetadata
 
 from dotenv import load_dotenv
 
@@ -68,6 +68,14 @@ class ChatResponse(BaseModel):
     choices: List[str]
 
 
+class CreateBookRequest(BaseModel):
+    title: Optional[str] = None
+
+
+class UpdateTitleRequest(BaseModel):
+    title: str
+
+
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
     book_id = req.book_id or str(uuid.uuid4())
@@ -78,7 +86,7 @@ async def chat_endpoint(req: ChatRequest):
     page = data.get("page", "")
     choices = data.get("choices", [])[:3]
 
-    book.add_page(page)
+    book.add_page(page, choices)
     book.update_summary(page)
 
     return ChatResponse(book_id=book_id, page=page, choices=choices)
@@ -87,7 +95,45 @@ async def chat_endpoint(req: ChatRequest):
 # ====== Book management endpoints ======
 @app.get("/api/books", response_model=List[BookInfo])
 async def list_books_endpoint():
-    return BookManager().list_all()
+    return BookManager.list_all()
+
+@app.post("/api/books", response_model=BookInfo)
+async def create_book_endpoint(req: CreateBookRequest):
+    book = BookManager.create_book(req.title)
+    return book.get_info()
+
+@app.get("/api/books/{book_id}", response_model=BookInfo)
+async def get_book_endpoint(book_id: str):
+    try:
+        book = Book(book_id)
+        return book.get_info()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.put("/api/books/{book_id}/title")
+async def update_book_title_endpoint(book_id: str, req: UpdateTitleRequest):
+    try:
+        book = Book(book_id)
+        book.set_title(req.title)
+        return {"detail": "Title updated", "title": req.title}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.get("/api/books/{book_id}/metadata", response_model=BookMetadata)
+async def get_book_metadata_endpoint(book_id: str):
+    try:
+        book = Book(book_id)
+        return book.metadata
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.get("/api/books/{book_id}/choices")
+async def get_book_choices_endpoint(book_id: str):
+    try:
+        book = Book(book_id)
+        return {"choices": book.get_current_choices()}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
 
 @app.delete("/api/books/{book_id}")
 async def delete_book_endpoint(book_id: str):
@@ -106,4 +152,4 @@ async def get_book_summary_endpoint(book_id: str):
 
 @app.get("/api/books/{book_id}/pages")
 async def get_book_pages_endpoint(book_id: str):
-    return {"pages": Book(book_id).load_pages()}
+    return {"pages": Book(book_id).get_page_texts()}

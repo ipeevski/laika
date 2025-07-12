@@ -17,14 +17,115 @@ export default function App() {
   const [loading, setLoading] = useState(false)
   const [customChoice, setCustomChoice] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
+  const [books, setBooks] = useState([])
+  const [currentBookId, setCurrentBookId] = useState(null)
+  const [currentBookTitle, setCurrentBookTitle] = useState('')
+  const [showBookSelector, setShowBookSelector] = useState(false)
+  const [showCreateBook, setShowCreateBook] = useState(false)
+  const [newBookTitle, setNewBookTitle] = useState('')
 
-  async function sendChoice(choice = null) {
+  async function loadBooks() {
+    try {
+      const res = await fetch(`${API_BASE}/api/books`)
+      if (res.ok) {
+        const booksData = await res.json()
+        setBooks(booksData)
+      }
+    } catch (err) {
+      console.error('Failed to load books:', err)
+    }
+  }
+
+  async function createBook(title = null) {
+    try {
+      const res = await fetch(`${API_BASE}/api/books`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title }),
+      })
+      if (res.ok) {
+        const newBook = await res.json()
+        setBooks(prev => [...prev, newBook])
+        setCurrentBookId(newBook.id)
+        setCurrentBookTitle(newBook.title)
+        setShowCreateBook(false)
+        setNewBookTitle('')
+        // Start the new book
+        await sendChoice(null, newBook.id)
+      }
+    } catch (err) {
+      console.error('Failed to create book:', err)
+      alert('Error creating book')
+    }
+  }
+
+  async function loadBook(bookId) {
+    try {
+      console.log('Loading book:', bookId)
+
+      const res = await fetch(`${API_BASE}/api/books/${bookId}`)
+      if (!res.ok) {
+        throw new Error(`Failed to fetch book info: ${res.status}`)
+      }
+
+      const bookData = await res.json()
+      console.log('Book data:', bookData)
+
+      setCurrentBookId(bookId)
+      setCurrentBookTitle(bookData.title)
+
+      // Load pages for this book
+      const pagesRes = await fetch(`${API_BASE}/api/books/${bookId}/pages`)
+      let pagesData = { pages: [] }
+
+      if (pagesRes.ok) {
+        pagesData = await pagesRes.json()
+        console.log('Pages data:', pagesData)
+        setPages(pagesData.pages.map(page => ({ text: page, image: null })))
+        setCurrentIndex(pagesData.pages.length - 1)
+      } else {
+        console.warn('Failed to load pages:', pagesRes.status)
+      }
+
+      // Load choices for this book
+      if (pagesData.pages.length > 0) {
+        // Load current choices for the book
+        const choicesRes = await fetch(`${API_BASE}/api/books/${bookId}/choices`)
+        if (choicesRes.ok) {
+          const choicesData = await choicesRes.json()
+          console.log('Choices data:', choicesData)
+          setChoices(choicesData.choices)
+        } else {
+          console.warn('Failed to load choices:', choicesRes.status)
+          setChoices([])
+        }
+      } else {
+        // If no pages exist, start the book
+        console.log('Starting new book')
+        await sendChoice(null, bookId)
+      }
+
+      setShowBookSelector(false)
+    } catch (err) {
+      console.error('Failed to load book:', err)
+      alert(`Error loading book: ${err.message}`)
+    }
+  }
+
+  async function sendChoice(choice = null, bookId = null) {
+    const targetBookId = bookId || currentBookId
+    if (!targetBookId) {
+      // Create a new book if none exists
+      await createBook()
+      return
+    }
+
     setLoading(true)
     try {
       const res = await fetch(`${API_BASE}/api/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ choice }),
+        body: JSON.stringify({ book_id: targetBookId, choice }),
       })
       if (!res.ok) {
         throw new Error('Request failed')
@@ -63,9 +164,18 @@ export default function App() {
   }
 
   useEffect(() => {
-    sendChoice()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    loadBooks()
   }, [])
+
+  useEffect(() => {
+    // If no current book and books exist, load the first one
+    if (!currentBookId && books.length > 0) {
+      loadBook(books[0].id)
+    } else if (!currentBookId && books.length === 0) {
+      // Create a new book if none exist
+      createBook()
+    }
+  }, [books, currentBookId])
 
   function goPrev() {
     setCurrentIndex(i => (i > 0 ? i - 1 : i))
@@ -78,7 +188,37 @@ export default function App() {
   return (
     <div className="layout">
       <aside className="sidebar">
-        <ul>
+        <div className="book-selector">
+          <button
+            onClick={() => setShowBookSelector(!showBookSelector)}
+            className="book-selector-button"
+          >
+            📚 {currentBookTitle || 'Select Book'}
+          </button>
+
+          {showBookSelector && (
+            <div className="book-list">
+              {books.map(book => (
+                <div
+                  key={book.id}
+                  className={`book-item ${book.id === currentBookId ? 'active' : ''}`}
+                  onClick={() => loadBook(book.id)}
+                >
+                  <div className="book-title">{book.title}</div>
+                  <div className="book-info">{book.num_pages} pages</div>
+                </div>
+              ))}
+              <button
+                onClick={() => setShowCreateBook(true)}
+                className="create-book-button"
+              >
+                + New Book
+              </button>
+            </div>
+          )}
+        </div>
+
+        <ul className="page-list">
           {pages.map((_, idx) => (
             <li
               key={idx}
@@ -92,7 +232,7 @@ export default function App() {
       </aside>
 
       <div className="container">
-        <h1 className="title">Book</h1>
+        <h1 className="title">{currentBookTitle || 'Book'}</h1>
 
         {currentIndex >= 0 && pages[currentIndex] && (
           <div className="page">
@@ -161,6 +301,41 @@ export default function App() {
           )}
         </div>
       </div>
+
+      {/* Create Book Modal */}
+      {showCreateBook && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h3>Create New Book</h3>
+            <input
+              type="text"
+              value={newBookTitle}
+              onChange={(e) => setNewBookTitle(e.target.value)}
+              placeholder="Enter book title (optional)"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  createBook(newBookTitle || null)
+                } else if (e.key === 'Escape') {
+                  setShowCreateBook(false)
+                  setNewBookTitle('')
+                }
+              }}
+              autoFocus
+            />
+            <div className="modal-buttons">
+              <button onClick={() => createBook(newBookTitle || null)}>
+                Create
+              </button>
+              <button onClick={() => {
+                setShowCreateBook(false)
+                setNewBookTitle('')
+              }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
