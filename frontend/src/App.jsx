@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react'
 import BookManager from './components/BookManager'
 import BookSelector from './components/BookSelector'
 import WelcomeScreen from './components/WelcomeScreen'
-import Spinner from './components/Spinner'
+import BookSidebar from './components/BookSidebar'
+import BookReader from './components/BookReader'
+import EditTitleModal from './components/EditTitleModal'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -227,6 +229,40 @@ export default function App() {
     setShowWelcome(true)
   }
 
+  function handlePageNavigation(direction) {
+    if (direction === 'prev') {
+      setCurrentIndex(i => (i > 0 ? i - 1 : i))
+    } else if (direction === 'next') {
+      setCurrentIndex(i => (i < pages.length - 1 ? i + 1 : i))
+    }
+  }
+
+  function handlePageSelect(index) {
+    setCurrentIndex(index)
+  }
+
+  function handleCustomChoiceChange(e) {
+    setCustomChoice(e.target.value)
+  }
+
+  function handleToggleCustomInput() {
+    setShowCustomInput(true)
+  }
+
+  function handleCustomChoiceCancel() {
+    setShowCustomInput(false)
+    setCustomChoice('')
+  }
+
+  function handleEditTitleSave() {
+    updateBookTitle(currentBookId, editingTitle.trim())
+  }
+
+  function handleEditTitleCancel() {
+    setShowEditTitle(false)
+    setEditingTitle('')
+  }
+
   useEffect(() => {
     loadBooks()
   }, [])
@@ -278,123 +314,34 @@ export default function App() {
     )
   }
 
-  function goPrev() {
-    setCurrentIndex(i => (i > 0 ? i - 1 : i))
-  }
-
-  function goNext() {
-    setCurrentIndex(i => (i < pages.length - 1 ? i + 1 : i))
-  }
-
   return (
     <>
       <div className="layout">
-                  <aside className="sidebar">
-            <div className="book-info">
-              <button
-                onClick={() => setShowBookSelector(true)}
-                className="back-button"
-                title="Switch Book"
-              >
-                ← Back
-              </button>
-            </div>
-            <br/>
+        <BookSidebar
+          currentBookTitle={currentBookTitle}
+          pages={pages}
+          currentIndex={currentIndex}
+          onSwitchBook={() => setShowBookSelector(true)}
+          onPageSelect={handlePageSelect}
+        />
 
-          <ul className="page-list">
-            {pages.map((_, idx) => (
-              <li
-                key={idx}
-                className={idx === currentIndex ? 'active' : ''}
-                onClick={() => setCurrentIndex(idx)}
-              >
-                Page {idx + 1}
-              </li>
-            ))}
-          </ul>
-        </aside>
-
-        <div className="container">
-          <div className="title-container">
-            <h1 className="title">{currentBookTitle || 'Book'}</h1>
-            {currentBookId && (
-              <button
-                onClick={handleEditTitle}
-                className="edit-title-button"
-                title="Edit book title"
-              >
-                ✏️
-              </button>
-            )}
-          </div>
-
-          {currentIndex >= 0 && pages[currentIndex] && (
-            <div className="page">
-              {pages[currentIndex].image && (
-                <img src={pages[currentIndex].image} alt="illustration" />
-              )}
-              <p>{pages[currentIndex].text}</p>
-            </div>
-          )}
-
-          {loading && <Spinner />}
-
-          <div className="nav-buttons">
-            <button onClick={goPrev} disabled={currentIndex <= 0}>
-              Prev
-            </button>
-            <button onClick={goNext} disabled={currentIndex >= pages.length - 1}>
-              Next
-            </button>
-          </div>
-
-          <div className="choices">
-            {choices.map((choice, index) => (
-              <button
-                key={index}
-                disabled={loading}
-                onClick={() => handleChoiceClick(choice)}
-                className={`choice-button ${showCustomInput ? 'choice-button-custom-mode' : ''}`}
-              >
-                {choice}
-              </button>
-            ))}
-
-            {showCustomInput ? (
-              <div className="custom-choice">
-                <input
-                  type="text"
-                  value={customChoice}
-                  onChange={(e) => setCustomChoice(e.target.value)}
-                  placeholder="Enter your own choice..."
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleCustomChoiceSubmit()
-                    }
-                  }}
-                  autoFocus
-                />
-                <button onClick={handleCustomChoiceSubmit} disabled={!customChoice.trim()}>
-                  Submit
-                </button>
-                <button onClick={() => {
-                  setShowCustomInput(false)
-                  setCustomChoice('')
-                }}>
-                  Cancel
-                </button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowCustomInput(true)}
-                className="add-custom-choice"
-                disabled={loading}
-              >
-                + Add Custom Choice
-              </button>
-            )}
-          </div>
-        </div>
+        <BookReader
+          currentBookTitle={currentBookTitle}
+          currentBookId={currentBookId}
+          pages={pages}
+          currentIndex={currentIndex}
+          choices={choices}
+          loading={loading}
+          customChoice={customChoice}
+          showCustomInput={showCustomInput}
+          onEditTitle={handleEditTitle}
+          onPageNavigation={handlePageNavigation}
+          onChoiceClick={handleChoiceClick}
+          onCustomChoiceChange={handleCustomChoiceChange}
+          onCustomChoiceSubmit={handleCustomChoiceSubmit}
+          onToggleCustomInput={handleToggleCustomInput}
+          onCustomChoiceCancel={handleCustomChoiceCancel}
+        />
       </div>
 
       <BookManager
@@ -407,40 +354,13 @@ export default function App() {
         onCreateBook={createBook}
       />
 
-      {/* Edit Title Modal */}
-      {showEditTitle && (
-        <div className="modal-overlay">
-          <div className="modal">
-            <h3>Edit Book Title</h3>
-            <input
-              type="text"
-              value={editingTitle}
-              onChange={(e) => setEditingTitle(e.target.value)}
-              placeholder="Enter new book title"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  updateBookTitle(currentBookId, editingTitle.trim())
-                } else if (e.key === 'Escape') {
-                  setShowEditTitle(false)
-                  setEditingTitle('')
-                }
-              }}
-              autoFocus
-            />
-            <div className="modal-buttons">
-              <button onClick={() => updateBookTitle(currentBookId, editingTitle.trim())}>
-                Save
-              </button>
-              <button onClick={() => {
-                setShowEditTitle(false)
-                setEditingTitle('')
-              }}>
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <EditTitleModal
+        showEditTitle={showEditTitle}
+        editingTitle={editingTitle}
+        onEditingTitleChange={(e) => setEditingTitle(e.target.value)}
+        onSave={handleEditTitleSave}
+        onCancel={handleEditTitleCancel}
+      />
     </>
   )
 }
