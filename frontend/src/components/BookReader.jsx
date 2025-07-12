@@ -56,49 +56,51 @@ export default function BookReader({
         </button>
       </div>
 
-      <div className="choices">
-        {choices.map((choice, index) => (
-          <button
-            key={index}
-            disabled={loading}
-            onClick={() => onChoiceClick(choice)}
-            className={`choice-button ${showCustomInput ? 'choice-button-custom-mode' : ''}`}
-          >
-            {choice}
-          </button>
-        ))}
+      {currentIndex === pages.length - 1 && (
+        <div className="choices">
+          {choices.map((choice, index) => (
+            <button
+              key={index}
+              disabled={loading}
+              onClick={() => onChoiceClick(choice)}
+              className={`choice-button ${showCustomInput ? 'choice-button-custom-mode' : ''}`}
+            >
+              {choice}
+            </button>
+          ))}
 
-        {showCustomInput ? (
-          <div className="custom-choice">
-            <input
-              type="text"
-              value={customChoice}
-              onChange={onCustomChoiceChange}
-              placeholder="Enter your own choice..."
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  onCustomChoiceSubmit()
-                }
-              }}
-              autoFocus
-            />
-            <button onClick={onCustomChoiceSubmit} disabled={!customChoice.trim()}>
-              Submit
+          {showCustomInput ? (
+            <div className="custom-choice">
+              <input
+                type="text"
+                value={customChoice}
+                onChange={onCustomChoiceChange}
+                placeholder="Enter your own choice..."
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    onCustomChoiceSubmit()
+                  }
+                }}
+                autoFocus
+              />
+              <button onClick={onCustomChoiceSubmit} disabled={!customChoice.trim()}>
+                Submit
+              </button>
+              <button onClick={onCustomChoiceCancel}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={onToggleCustomInput}
+              className="add-custom-choice"
+              disabled={loading}
+            >
+              + Add Custom Choice
             </button>
-            <button onClick={onCustomChoiceCancel}>
-              Cancel
-            </button>
-          </div>
-        ) : (
-          <button
-            onClick={onToggleCustomInput}
-            className="add-custom-choice"
-            disabled={loading}
-          >
-            + Add Custom Choice
-          </button>
-        )}
-      </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
