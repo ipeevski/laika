@@ -200,6 +200,13 @@ export default function App() {
       setChoices(data.choices)
       setCustomChoice('')
       setShowCustomInput(false)
+
+      // Update the book's page count in the local state
+      setBooks(prev => prev.map(book =>
+        book.id === targetBookId
+          ? { ...book, num_pages: book.num_pages + 1 }
+          : book
+      ))
     } catch (err) {
       console.error(err)
       alert('Error generating page')
