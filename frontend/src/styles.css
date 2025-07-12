@@ -500,11 +500,13 @@ button:disabled {
 }
 
 .page-list li {
+  margin: 2px 5px;
   cursor: pointer;
   padding: 0.5rem 0.75rem;
   border-radius: 6px;
   transition: background 0.2s;
   font-size: 0.875rem;
+  white-space: nowrap;
 }
 
 .page-list li:hover {
@@ -684,6 +686,7 @@ button:disabled {
   cursor: pointer;
   font-size: 0.875rem;
   transition: all 0.2s;
+  white-space: nowrap;
 }
 
 .back-button:hover {
