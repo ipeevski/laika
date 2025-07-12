@@ -10,6 +10,61 @@ function Spinner() {
   )
 }
 
+function WelcomeScreen({ onStartNew, onContinueExisting, books, loading }) {
+  return (
+    <div className="welcome-screen">
+      <div className="welcome-content">
+        <h1>Welcome to Book Builder</h1>
+        <p>Create your own choose-your-own-adventure stories with AI assistance.</p>
+
+        <div className="welcome-choices">
+          <button
+            onClick={onStartNew}
+            className="welcome-button new-book-button"
+            disabled={loading}
+          >
+            <div className="button-icon">✨</div>
+            <div className="button-content">
+              <h3>Start New Book</h3>
+              <p>Begin a fresh adventure with a new story</p>
+            </div>
+          </button>
+
+          {books.length > 0 && (
+            <button
+              onClick={onContinueExisting}
+              className="welcome-button continue-button"
+              disabled={loading}
+            >
+              <div className="button-icon">📚</div>
+              <div className="button-content">
+                <h3>Continue Existing</h3>
+                <p>Pick up where you left off with {books.length} book{books.length !== 1 ? 's' : ''}</p>
+              </div>
+            </button>
+          )}
+        </div>
+
+        {books.length > 0 && (
+          <div className="recent-books">
+            <h3>Recent Books</h3>
+            <div className="recent-books-list">
+              {books.slice(0, 3).map(book => (
+                <div key={book.id} className="recent-book-item">
+                  <div className="recent-book-title">{book.title}</div>
+                  <div className="recent-book-info">
+                    {book.num_pages} pages • Updated {new Date(book.updated_at).toLocaleDateString()}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [pages, setPages] = useState([])
   const [currentIndex, setCurrentIndex] = useState(-1)
@@ -23,6 +78,8 @@ export default function App() {
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [showCreateBook, setShowCreateBook] = useState(false)
   const [newBookTitle, setNewBookTitle] = useState('')
+  const [showWelcome, setShowWelcome] = useState(true)
+  const [initialLoading, setInitialLoading] = useState(true)
 
   async function loadBooks() {
     try {
@@ -33,6 +90,8 @@ export default function App() {
       }
     } catch (err) {
       console.error('Failed to load books:', err)
+    } finally {
+      setInitialLoading(false)
     }
   }
 
@@ -50,6 +109,7 @@ export default function App() {
         setCurrentBookTitle(newBook.title)
         setShowCreateBook(false)
         setNewBookTitle('')
+        setShowWelcome(false)
         // Start the new book
         await sendChoice(null, newBook.id)
       }
@@ -106,6 +166,7 @@ export default function App() {
       }
 
       setShowBookSelector(false)
+      setShowWelcome(false)
     } catch (err) {
       console.error('Failed to load book:', err)
       alert(`Error loading book: ${err.message}`)
@@ -163,19 +224,36 @@ export default function App() {
     }
   }
 
+  function handleStartNew() {
+    setShowCreateBook(true)
+  }
+
+  function handleContinueExisting() {
+    if (books.length === 1) {
+      // If only one book exists, load it directly
+      loadBook(books[0].id)
+    } else {
+      // If multiple books exist, show the book selector
+      setShowBookSelector(true)
+      setShowWelcome(false)
+    }
+  }
+
   useEffect(() => {
     loadBooks()
   }, [])
 
-  useEffect(() => {
-    // If no current book and books exist, load the first one
-    if (!currentBookId && books.length > 0) {
-      loadBook(books[0].id)
-    } else if (!currentBookId && books.length === 0) {
-      // Create a new book if none exist
-      createBook()
-    }
-  }, [books, currentBookId])
+  // Show welcome screen until user makes a choice
+  if (showWelcome) {
+    return (
+      <WelcomeScreen
+        onStartNew={handleStartNew}
+        onContinueExisting={handleContinueExisting}
+        books={books}
+        loading={initialLoading}
+      />
+    )
+  }
 
   function goPrev() {
     setCurrentIndex(i => (i > 0 ? i - 1 : i))
