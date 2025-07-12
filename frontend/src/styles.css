@@ -662,7 +662,7 @@ button:disabled {
 .book-selector-header {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 1rem;
   margin-bottom: 2rem;
   background: #fff;
   padding: 1.5rem;
@@ -671,14 +671,16 @@ button:disabled {
 }
 
 .book-selector-header h2 {
-  margin: 0 200px;
   color: #111827;
   font-size: 1.5rem;
   font-weight: 600;
+  flex: 1;
+  margin: 0;
+  text-align: center;
 }
 
 .back-button {
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   background: #f3f4f6;
   color: #374151;
   border: 1px solid #d1d5db;
@@ -687,6 +689,7 @@ button:disabled {
   font-size: 0.875rem;
   transition: all 0.2s;
   white-space: nowrap;
+  max-width: fit-content;
 }
 
 .back-button:hover {
@@ -695,7 +698,7 @@ button:disabled {
 }
 
 .new-book-button-header {
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
   background: #7c3aed;
   color: #fff;
   border: none;
@@ -703,6 +706,8 @@ button:disabled {
   cursor: pointer;
   font-size: 0.875rem;
   transition: background 0.2s;
+  white-space: nowrap;
+  max-width: fit-content;
 }
 
 .new-book-button-header:hover {
@@ -744,6 +749,46 @@ button:disabled {
   transform: translateY(-50%);
   color: #6b7280;
   font-size: 1rem;
+}
+
+.sort-section {
+  margin-bottom: 1.5rem;
+}
+
+.sort-section h4 {
+  margin: 0 0 0.75rem 0;
+  color: #374151;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.sort-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.sort-button {
+  padding: 0.5rem 0.75rem;
+  background: #f3f4f6;
+  color: #374151;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.875rem;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+
+.sort-button:hover {
+  background: #e5e7eb;
+  border-color: #9ca3af;
+}
+
+.sort-button.active {
+  background: #2563eb;
+  color: #fff;
+  border-color: #2563eb;
 }
 
 .tags-section h4 {

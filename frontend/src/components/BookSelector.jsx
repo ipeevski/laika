@@ -3,6 +3,8 @@ import React, { useState } from 'react'
 export default function BookSelector({ books, onSelectBook, onBack, onCreateNew }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTags, setSelectedTags] = useState([])
+  const [sortField, setSortField] = useState('updated_at')
+  const [sortDirection, setSortDirection] = useState('desc')
 
   // Extract unique tags from books (for future implementation)
   const allTags = []
@@ -16,6 +18,38 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
     }
   })
 
+  // Sort books based on selected field and direction
+  const sortBooks = (booksToSort) => {
+    return [...booksToSort].sort((a, b) => {
+      let aValue, bValue
+
+      switch (sortField) {
+        case 'title':
+          aValue = a.title.toLowerCase()
+          bValue = b.title.toLowerCase()
+          break
+        case 'num_pages':
+          aValue = a.num_pages
+          bValue = b.num_pages
+          break
+        case 'updated_at':
+        case 'created_at':
+          aValue = new Date(a[sortField])
+          bValue = new Date(b[sortField])
+          break
+        default:
+          aValue = a[sortField]
+          bValue = b[sortField]
+      }
+
+      if (sortDirection === 'asc') {
+        return aValue > bValue ? 1 : -1
+      } else {
+        return aValue < bValue ? 1 : -1
+      }
+    })
+  }
+
   // Filter books based on search term and tags
   const filteredBooks = books.filter(book => {
     const matchesSearch = book.title.toLowerCase().includes(searchTerm.toLowerCase())
@@ -23,6 +57,25 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
       (book.tags && selectedTags.some(tag => book.tags.includes(tag)))
     return matchesSearch && matchesTags
   })
+
+  // Apply sorting to filtered books
+  const sortedBooks = sortBooks(filteredBooks)
+
+  const handleSortChange = (field) => {
+    if (sortField === field) {
+      // Toggle direction if same field
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')
+    } else {
+      // Set new field with default direction
+      setSortField(field)
+      setSortDirection('asc')
+    }
+  }
+
+  const getSortIcon = (field) => {
+    if (sortField !== field) return '↕️'
+    return sortDirection === 'asc' ? '↑' : '↓'
+  }
 
   return (
     <div className="book-selector-screen">
@@ -47,6 +100,36 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
             autoFocus
           />
           <span className="search-icon">🔍</span>
+        </div>
+
+        <div className="sort-section">
+          <h4>Sort by:</h4>
+          <div className="sort-buttons">
+            <button
+              onClick={() => handleSortChange('title')}
+              className={`sort-button ${sortField === 'title' ? 'active' : ''}`}
+            >
+              Title {getSortIcon('title')}
+            </button>
+            <button
+              onClick={() => handleSortChange('num_pages')}
+              className={`sort-button ${sortField === 'num_pages' ? 'active' : ''}`}
+            >
+              Pages {getSortIcon('num_pages')}
+            </button>
+            <button
+              onClick={() => handleSortChange('updated_at')}
+              className={`sort-button ${sortField === 'updated_at' ? 'active' : ''}`}
+            >
+              Updated {getSortIcon('updated_at')}
+            </button>
+            <button
+              onClick={() => handleSortChange('created_at')}
+              className={`sort-button ${sortField === 'created_at' ? 'active' : ''}`}
+            >
+              Created {getSortIcon('created_at')}
+            </button>
+          </div>
         </div>
 
         {allTags.length > 0 && (
@@ -74,8 +157,8 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
       </div>
 
       <div className="books-grid">
-        {filteredBooks.length > 0 ? (
-          filteredBooks.map(book => (
+        {sortedBooks.length > 0 ? (
+          sortedBooks.map(book => (
             <div
               key={book.id}
               className="book-card"
