@@ -1,10 +1,13 @@
 import React, { useState } from 'react'
+import BookManagerDialog from './BookManagerDialog'
 
-export default function BookSelector({ books, onSelectBook, onBack, onCreateNew }) {
+export default function BookSelector({ books, onSelectBook, onBack, onCreateNew, onBookDeleted, onBookUpdated }) {
   const [searchTerm, setSearchTerm] = useState('')
   const [selectedTags, setSelectedTags] = useState([])
   const [sortField, setSortField] = useState('updated_at')
   const [sortDirection, setSortDirection] = useState('desc')
+  const [showManageDialog, setShowManageDialog] = useState(false)
+  const [selectedBook, setSelectedBook] = useState(null)
 
   // Extract unique tags from books (for future implementation)
   const allTags = []
@@ -75,6 +78,24 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
   const getSortIcon = (field) => {
     if (sortField !== field) return '↕️'
     return sortDirection === 'asc' ? '↑' : '↓'
+  }
+
+  const handleManageClick = (e, book) => {
+    e.stopPropagation() // Prevent card click
+    setSelectedBook(book)
+    setShowManageDialog(true)
+  }
+
+  const handleBookUpdated = (bookId, updatedData) => {
+    if (onBookUpdated) {
+      onBookUpdated(bookId, updatedData)
+    }
+  }
+
+  const handleBookDeleted = (bookId) => {
+    if (onBookDeleted) {
+      onBookDeleted(bookId)
+    }
   }
 
   return (
@@ -183,6 +204,13 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
                   </div>
                 )}
               </div>
+              <button
+                onClick={(e) => handleManageClick(e, book)}
+                className="manage-book-button"
+                title="Manage book"
+              >
+                ⚙️
+              </button>
             </div>
           ))
         ) : (
@@ -194,6 +222,17 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew 
           </div>
         )}
       </div>
+
+      <BookManagerDialog
+        book={selectedBook}
+        showDialog={showManageDialog}
+        onClose={() => {
+          setShowManageDialog(false)
+          setSelectedBook(null)
+        }}
+        onBookUpdated={handleBookUpdated}
+        onBookDeleted={handleBookDeleted}
+      />
     </div>
   )
 }

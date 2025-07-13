@@ -5,6 +5,7 @@ import WelcomeScreen from './components/WelcomeScreen'
 import BookSidebar from './components/BookSidebar'
 import BookReader from './components/BookReader'
 import EditTitleModal from './components/EditTitleModal'
+import BookManagerDialog from './components/BookManagerDialog'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -26,6 +27,8 @@ export default function App() {
   const [showEditTitle, setShowEditTitle] = useState(false)
   const [editingTitle, setEditingTitle] = useState('')
   const [showBookSelector, setShowBookSelector] = useState(false)
+  const [showManageBook, setShowManageBook] = useState(false)
+  const [selectedBook, setSelectedBook] = useState(null)
 
   async function loadBooks() {
     try {
@@ -101,6 +104,24 @@ export default function App() {
   function handleEditTitle() {
     setEditingTitle(currentBookTitle)
     setShowEditTitle(true)
+  }
+
+  async function handleManageBook() {
+    if (!currentBookId) return
+
+    try {
+      const res = await fetch(`${API_BASE}/api/books/${currentBookId}`)
+      if (res.ok) {
+        const bookData = await res.json()
+        setSelectedBook(bookData)
+        setShowManageBook(true)
+      } else {
+        throw new Error('Failed to fetch book data')
+      }
+    } catch (err) {
+      console.error('Failed to fetch book data:', err)
+      alert('Error loading book data')
+    }
   }
 
   async function loadBook(bookId) {
@@ -229,6 +250,34 @@ export default function App() {
     setShowWelcome(true)
   }
 
+    function handleBookDeleted(bookId) {
+    // Remove the deleted book from the local state
+    setBooks(prev => prev.filter(book => book.id !== bookId))
+
+    // If the deleted book was the current book, clear the current book
+    if (currentBookId === bookId) {
+      setCurrentBookId(null)
+      setCurrentBookTitle('')
+      setPages([])
+      setCurrentIndex(-1)
+      setChoices([])
+    }
+  }
+
+  function handleBookUpdated(bookId, updatedData) {
+    // Update the book in the local state
+    setBooks(prev => prev.map(book =>
+      book.id === bookId
+        ? { ...book, ...updatedData }
+        : book
+    ))
+
+    // If the updated book was the current book, update the current book title
+    if (currentBookId === bookId && updatedData.title) {
+      setCurrentBookTitle(updatedData.title)
+    }
+  }
+
   function handlePageNavigation(direction) {
     if (direction === 'prev') {
       setCurrentIndex(i => (i > 0 ? i - 1 : i))
@@ -300,6 +349,8 @@ export default function App() {
           onSelectBook={loadBook}
           onBack={handleBackToWelcome}
           onCreateNew={handleStartNew}
+          onBookDeleted={handleBookDeleted}
+          onBookUpdated={handleBookUpdated}
         />
         <BookManager
           showCreateBook={showCreateBook}
@@ -323,6 +374,7 @@ export default function App() {
           currentIndex={currentIndex}
           onSwitchBook={() => setShowBookSelector(true)}
           onPageSelect={handlePageSelect}
+          onManageBook={handleManageBook}
         />
 
         <BookReader
@@ -335,6 +387,7 @@ export default function App() {
           customChoice={customChoice}
           showCustomInput={showCustomInput}
           onEditTitle={handleEditTitle}
+          onManageBook={handleManageBook}
           onPageNavigation={handlePageNavigation}
           onChoiceClick={handleChoiceClick}
           onCustomChoiceChange={handleCustomChoiceChange}
@@ -360,6 +413,17 @@ export default function App() {
         onEditingTitleChange={(e) => setEditingTitle(e.target.value)}
         onSave={handleEditTitleSave}
         onCancel={handleEditTitleCancel}
+      />
+
+      <BookManagerDialog
+        book={selectedBook}
+        showDialog={showManageBook}
+        onClose={() => {
+          setShowManageBook(false)
+          setSelectedBook(null)
+        }}
+        onBookDeleted={handleBookDeleted}
+        onBookUpdated={handleBookUpdated}
       />
     </>
   )

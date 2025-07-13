@@ -15,11 +15,17 @@ class BookInfo(BaseModel):
     num_pages: int
     created_at: str
     updated_at: str
+    description: Optional[str] = None
+    cover_url: Optional[str] = None
+    tags: List[str] = []
 
 class BookMetadata(BaseModel):
     title: str
     created_at: str
     updated_at: str
+    description: Optional[str] = None
+    cover_url: Optional[str] = None
+    tags: List[str] = []
     characters: List[Dict[str, Any]]
     key_events: List[Dict[str, Any]]
     timeline: List[Dict[str, Any]]
@@ -48,11 +54,29 @@ class Book:
             title=self.metadata.title,
             num_pages=self.num_pages,
             created_at=self.metadata.created_at,
-            updated_at=self.metadata.updated_at
+            updated_at=self.metadata.updated_at,
+            description=self.metadata.description,
+            cover_url=self.metadata.cover_url,
+            tags=self.metadata.tags
         )
 
     def set_title(self, title: str):
         self.metadata.title = title
+        self.save_metadata()
+        self.update_timestamp()
+
+    def set_description(self, description: str):
+        self.metadata.description = description
+        self.save_metadata()
+        self.update_timestamp()
+
+    def set_cover_url(self, cover_url: str):
+        self.metadata.cover_url = cover_url
+        self.save_metadata()
+        self.update_timestamp()
+
+    def set_tags(self, tags: List[str]):
+        self.metadata.tags = tags
         self.save_metadata()
         self.update_timestamp()
 

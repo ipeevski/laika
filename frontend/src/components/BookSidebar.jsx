@@ -5,7 +5,8 @@ export default function BookSidebar({
   pages,
   currentIndex,
   onSwitchBook,
-  onPageSelect
+  onPageSelect,
+  onManageBook
 }) {
   return (
     <aside className="sidebar">
@@ -17,6 +18,15 @@ export default function BookSidebar({
         >
           ← Back
         </button>
+        {onManageBook && (
+          <button
+            onClick={onManageBook}
+            className="manage-book-button-sidebar"
+            title="Manage Book"
+          >
+            ⚙️
+          </button>
+        )}
       </div>
       <br/>
 

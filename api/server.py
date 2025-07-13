@@ -79,6 +79,12 @@ class CreateBookRequest(BaseModel):
 class UpdateTitleRequest(BaseModel):
     title: str
 
+class UpdateBookRequest(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    cover_url: Optional[str] = None
+    tags: Optional[List[str]] = None
+
 
 @app.post("/api/chat", response_model=ChatResponse)
 async def chat_endpoint(req: ChatRequest):
@@ -128,6 +134,24 @@ async def update_book_title_endpoint(book_id: str, req: UpdateTitleRequest):
         book = Book(book_id)
         book.set_title(req.title)
         return {"detail": "Title updated", "title": req.title}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.put("/api/books/{book_id}")
+async def update_book_endpoint(book_id: str, req: UpdateBookRequest):
+    try:
+        book = Book(book_id)
+
+        if req.title is not None:
+            book.set_title(req.title)
+        if req.description is not None:
+            book.set_description(req.description)
+        if req.cover_url is not None:
+            book.set_cover_url(req.cover_url)
+        if req.tags is not None:
+            book.set_tags(req.tags)
+
+        return {"detail": "Book updated", "book": book.get_info()}
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Book not found")
 
