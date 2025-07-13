@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import BookManager from './components/BookManager'
 import BookSelector from './components/BookSelector'
 import WelcomeScreen from './components/WelcomeScreen'
@@ -30,6 +30,7 @@ export default function App() {
   const [showModelSelector, setShowModelSelector] = useState(false)
   const [currentModelId, setCurrentModelId] = useState(null)
   const [lastChoiceUsed, setLastChoiceUsed] = useState(null)
+  const streamRef = useRef(null)
 
   async function loadBooks() {
     try {
@@ -186,7 +187,7 @@ export default function App() {
     }
   }
 
-  function sendChoice(choice = null, bookId = null) {
+  function sendChoice(choice = null, bookId = null, regenerate = false) {
     const targetBookId = bookId || currentBookId
     if (!targetBookId) {
       console.error('No active book to send choice')
@@ -200,13 +201,20 @@ export default function App() {
     params.append('book_id', targetBookId)
     if (choice) params.append('choice', choice)
     if (currentModelId) params.append('model_id', currentModelId)
+    if (regenerate) params.append('regenerate', '1')
 
     const streamUrl = `${API_BASE}/api/chat/stream?${params.toString()}`
 
     let pageText = ''
-    let pageInitialised = false
+    let pageInitialised = regenerate ? true : false
+
+    // Close any existing stream before starting new one
+    if (streamRef.current) {
+      streamRef.current.close()
+    }
 
     const evtSource = new EventSource(streamUrl)
+    streamRef.current = evtSource
 
     // Remember the choice that led to this generation for potential regeneration
     setLastChoiceUsed(choice)
@@ -219,9 +227,11 @@ export default function App() {
         const newPages = [...prev]
 
         if (!pageInitialised) {
+          // For new generation append new page
           newPages.push({ text: pageText, image: null })
           pageInitialised = true
         } else {
+          // Replace last page text
           newPages[newPages.length - 1].text = pageText
         }
 
@@ -238,16 +248,19 @@ export default function App() {
         }
 
         // Update book list page count if it's a new page
-        setBooks(prev => prev.map(book =>
-          book.id === targetBookId
-            ? { ...book, num_pages: (book.num_pages || 0) + 1 }
-            : book
-        ))
+        if (!regenerate) {
+          setBooks(prev => prev.map(book =>
+            book.id === targetBookId
+              ? { ...book, num_pages: (book.num_pages || 0) + 1 }
+              : book
+          ))
+        }
       } catch(err) {
         console.error('Failed to parse choices event', err)
       } finally {
         setLoading(false)
         evtSource.close()
+        streamRef.current = null
         setCustomChoice('')
         setShowCustomInput(false)
       }
@@ -257,6 +270,7 @@ export default function App() {
       console.error('Streaming error', e)
       setLoading(false)
       evtSource.close()
+      streamRef.current = null
       alert('Error generating page')
     })
   }
@@ -264,7 +278,15 @@ export default function App() {
   function handleRegenerate() {
     if (loading) return
     // Use the last choice (may be null for the first page)
-    sendChoice(lastChoiceUsed)
+    sendChoice(lastChoiceUsed, null, true)
+  }
+
+  function handleStopGeneration() {
+    if (streamRef.current) {
+      streamRef.current.close()
+      streamRef.current = null
+      setLoading(false)
+    }
   }
 
   function handleChoiceClick(choice) {
@@ -298,17 +320,30 @@ export default function App() {
   }
 
     function handleBookDeleted(bookId) {
-    // Remove the deleted book from the local state
-    setBooks(prev => prev.filter(book => book.id !== bookId))
+    // Remove the deleted book from the local state and capture new list
+    setBooks(prev => {
+      const updated = prev.filter(book => book.id !== bookId)
 
-    // If the deleted book was the current book, clear the current book
-    if (currentBookId === bookId) {
-      setCurrentBookId(null)
-      setCurrentBookTitle('')
-      setPages([])
-      setCurrentIndex(-1)
-      setChoices([])
-    }
+      // If the deleted book was the current book, reset reading state
+      if (currentBookId === bookId) {
+        setCurrentBookId(null)
+        setCurrentBookTitle('')
+        setPages([])
+        setCurrentIndex(-1)
+        setChoices([])
+
+        // Navigate: if there are remaining books, show selector; else welcome
+        if (updated.length > 0) {
+          setShowBookSelector(true)
+          setShowWelcome(false)
+        } else {
+          setShowWelcome(true)
+          setShowBookSelector(false)
+        }
+      }
+
+      return updated
+    })
   }
 
   function handleBookUpdated(bookId, updatedData) {
@@ -427,6 +462,7 @@ export default function App() {
           onPageNavigation={handlePageNavigation}
           onChoiceClick={handleChoiceClick}
           onRegenerate={handleRegenerate}
+          onStopGeneration={handleStopGeneration}
           onCustomChoiceChange={handleCustomChoiceChange}
           onCustomChoiceSubmit={handleCustomChoiceSubmit}
           onToggleCustomInput={handleToggleCustomInput}

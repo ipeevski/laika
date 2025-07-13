@@ -18,7 +18,8 @@ export default function BookReader({
   onCustomChoiceSubmit,
   onToggleCustomInput,
   onCustomChoiceCancel,
-  onRegenerate
+  onRegenerate,
+  onStopGeneration
 }) {
   const goPrev = () => onPageNavigation('prev')
   const goNext = () => onPageNavigation('next')
@@ -45,7 +46,13 @@ export default function BookReader({
           {pages[currentIndex].image && (
             <img src={pages[currentIndex].image} alt="illustration" />
           )}
-          <ReactMarkdown>
+          <ReactMarkdown
+            components={{
+              p: ({node, ...props}) => (
+                <p style={{whiteSpace: 'pre-line'}} {...props} />
+              )
+            }}
+          >
             {pages[currentIndex].text}
           </ReactMarkdown>
         </div>
@@ -62,10 +69,14 @@ export default function BookReader({
             Next
           </button>
         )}
-        {onRegenerate &&
-         currentIndex >= pages.length - 1 && (
+        {onRegenerate && currentIndex >= pages.length - 1 && (
           <button onClick={onRegenerate} disabled={loading} title="Regenerate this page">
             ↻ Reload
+          </button>
+        )}
+        {loading && onStopGeneration && (
+          <button onClick={onStopGeneration} title="Stop generation">
+            ⏹ Stop
           </button>
         )}
       </div>
