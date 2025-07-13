@@ -86,6 +86,7 @@ class ChatRequest(BaseModel):
     book_id: Optional[str] = None
     choice: Optional[str] = None
     model_id: Optional[str] = None
+    regenerate: Optional[bool] = False
 
 
 class ChatResponse(BaseModel):
@@ -125,7 +126,10 @@ async def chat_endpoint(req: ChatRequest):
     page = data.get("page", "")
     choices = data.get("choices", [])[:3]
 
-    book.add_page(page, choices)
+    if req.regenerate and book.pages:
+        book.replace_last_page(page, choices)
+    else:
+        book.add_page(page, choices)
     book.update_summary(page)
 
     return ChatResponse(book_id=book_id, page=page, choices=choices)
@@ -292,7 +296,7 @@ def _generate_choices(page_text: str, model_id: Optional[str] = None) -> List[st
 
 
 @app.get("/api/chat/stream")
-async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, choice: Optional[str] = None, model_id: Optional[str] = None):
+async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, choice: Optional[str] = None, model_id: Optional[str] = None, regenerate: Optional[bool] = False):
     """Stream the generated page token-by-token followed by a final JSON event with the available reader choices.
 
     The response uses the Server-Sent Events (SSE) protocol. Regular message
@@ -350,8 +354,11 @@ async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, 
             # After page finished, generate choices ----------------------
             choices_list = _generate_choices(page_buffer, model_id)
 
-            # Save to book
-            book.add_page(page_buffer, choices_list)
+            # Save or replace page in book
+            if regenerate and book.pages:
+                book.replace_last_page(page_buffer, choices_list)
+            else:
+                book.add_page(page_buffer, choices_list)
             book.update_summary(page_buffer)
 
             # Send choices event

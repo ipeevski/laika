@@ -200,6 +200,21 @@ class Book:
             raise FileNotFoundError(f"Book directory {self.get_dir()} not found")
         return shutil.rmtree(self.get_dir())
 
+    def replace_last_page(self, page: str, choices: List[str] = None):
+        """Replace the most recent page with new content and choices."""
+        if not self.pages:
+            # If no pages exist yet, fallback to add
+            return self.add_page(page, choices)
+        last_page = self.pages[-1]
+        if isinstance(last_page, dict):
+            last_page["text"] = page
+            last_page["choices"] = choices or []
+        else:
+            # legacy string format
+            self.pages[-1] = page
+        self.save_pages()
+        self.update_timestamp()
+
 class BookManager:
     def list_all() -> List[BookInfo]:
         books_ids = [p.name for p in BOOKS_DIR.iterdir() if p.is_dir()]
