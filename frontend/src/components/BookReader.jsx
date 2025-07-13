@@ -17,7 +17,8 @@ export default function BookReader({
   onCustomChoiceChange,
   onCustomChoiceSubmit,
   onToggleCustomInput,
-  onCustomChoiceCancel
+  onCustomChoiceCancel,
+  onRegenerate
 }) {
   const goPrev = () => onPageNavigation('prev')
   const goNext = () => onPageNavigation('next')
@@ -56,9 +57,17 @@ export default function BookReader({
         <button onClick={goPrev} disabled={currentIndex <= 0}>
           Prev
         </button>
-        <button onClick={goNext} disabled={currentIndex >= pages.length - 1}>
-          Next
-        </button>
+        {currentIndex < pages.length - 1 && (
+          <button onClick={goNext} disabled={currentIndex >= pages.length - 1}>
+            Next
+          </button>
+        )}
+        {onRegenerate &&
+         currentIndex >= pages.length - 1 && (
+          <button onClick={onRegenerate} disabled={loading} title="Regenerate this page">
+            ↻ Reload
+          </button>
+        )}
       </div>
 
       {currentIndex === pages.length - 1 && (

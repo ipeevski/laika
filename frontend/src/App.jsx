@@ -24,12 +24,12 @@ export default function App() {
   const [newBookIdea, setNewBookIdea] = useState('')
   const [showWelcome, setShowWelcome] = useState(true)
   const [initialLoading, setInitialLoading] = useState(true)
-  const [showEditTitle, setShowEditTitle] = useState(false)
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [showManageBook, setShowManageBook] = useState(false)
   const [selectedBook, setSelectedBook] = useState(null)
   const [showModelSelector, setShowModelSelector] = useState(false)
   const [currentModelId, setCurrentModelId] = useState(null)
+  const [lastChoiceUsed, setLastChoiceUsed] = useState(null)
 
   async function loadBooks() {
     try {
@@ -208,6 +208,9 @@ export default function App() {
 
     const evtSource = new EventSource(streamUrl)
 
+    // Remember the choice that led to this generation for potential regeneration
+    setLastChoiceUsed(choice)
+
     evtSource.onmessage = (e) => {
       // Accumulate the streamed token
       pageText += e.data
@@ -256,6 +259,12 @@ export default function App() {
       evtSource.close()
       alert('Error generating page')
     })
+  }
+
+  function handleRegenerate() {
+    if (loading) return
+    // Use the last choice (may be null for the first page)
+    sendChoice(lastChoiceUsed)
   }
 
   function handleChoiceClick(choice) {
@@ -417,6 +426,7 @@ export default function App() {
           onModelSelector={handleModelSelector}
           onPageNavigation={handlePageNavigation}
           onChoiceClick={handleChoiceClick}
+          onRegenerate={handleRegenerate}
           onCustomChoiceChange={handleCustomChoiceChange}
           onCustomChoiceSubmit={handleCustomChoiceSubmit}
           onToggleCustomInput={handleToggleCustomInput}
