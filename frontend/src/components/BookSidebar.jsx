@@ -1,7 +1,6 @@
 import React from 'react'
 
 export default function BookSidebar({
-  currentBookTitle,
   pages,
   currentIndex,
   onSwitchBook,

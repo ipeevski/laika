@@ -4,8 +4,8 @@ import BookSelector from './components/BookSelector'
 import WelcomeScreen from './components/WelcomeScreen'
 import BookSidebar from './components/BookSidebar'
 import BookReader from './components/BookReader'
-import EditTitleModal from './components/EditTitleModal'
 import BookManagerDialog from './components/BookManagerDialog'
+import ModelSelector from './components/ModelSelector'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -25,10 +25,11 @@ export default function App() {
   const [showWelcome, setShowWelcome] = useState(true)
   const [initialLoading, setInitialLoading] = useState(true)
   const [showEditTitle, setShowEditTitle] = useState(false)
-  const [editingTitle, setEditingTitle] = useState('')
   const [showBookSelector, setShowBookSelector] = useState(false)
   const [showManageBook, setShowManageBook] = useState(false)
   const [selectedBook, setSelectedBook] = useState(null)
+  const [showModelSelector, setShowModelSelector] = useState(false)
+  const [currentModelId, setCurrentModelId] = useState(null)
 
   async function loadBooks() {
     try {
@@ -62,7 +63,7 @@ export default function App() {
         setShowWelcome(false)
         setShowBookSelector(false)
         // Start the new book
-        await sendChoice(null, newBook.id)
+        sendChoice(null, newBook.id)
       }
     } catch (err) {
       console.error('Failed to create book:', err)
@@ -91,7 +92,6 @@ export default function App() {
         }
 
         setShowEditTitle(false)
-        setEditingTitle('')
       } else {
         throw new Error('Failed to update title')
       }
@@ -102,7 +102,6 @@ export default function App() {
   }
 
   function handleEditTitle() {
-    setEditingTitle(currentBookTitle)
     setShowEditTitle(true)
   }
 
@@ -122,6 +121,15 @@ export default function App() {
       console.error('Failed to fetch book data:', err)
       alert('Error loading book data')
     }
+  }
+
+  function handleModelSelector() {
+    setShowModelSelector(true)
+  }
+
+  function handleModelSelect(model) {
+    setCurrentModelId(model.id)
+    setShowModelSelector(false)
   }
 
   async function loadBook(bookId) {
@@ -167,7 +175,7 @@ export default function App() {
       } else {
         // If no pages exist, start the book
         console.log('Starting new book')
-        await sendChoice(null, bookId)
+        sendChoice(null, bookId)
       }
 
       setShowBookSelector(false)
@@ -178,46 +186,76 @@ export default function App() {
     }
   }
 
-  async function sendChoice(choice = null, bookId = null) {
+  function sendChoice(choice = null, bookId = null) {
     const targetBookId = bookId || currentBookId
     if (!targetBookId) {
-      // Create a new book if none exists
-      await createBook()
+      console.error('No active book to send choice')
       return
     }
 
     setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/api/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ book_id: targetBookId, choice }),
-      })
-      if (!res.ok) {
-        throw new Error('Request failed')
-      }
-      const data = await res.json()
+
+    // Build stream URL with query params
+    const params = new URLSearchParams()
+    params.append('book_id', targetBookId)
+    if (choice) params.append('choice', choice)
+    if (currentModelId) params.append('model_id', currentModelId)
+
+    const streamUrl = `${API_BASE}/api/chat/stream?${params.toString()}`
+
+    let pageText = ''
+    let pageInitialised = false
+
+    const evtSource = new EventSource(streamUrl)
+
+    evtSource.onmessage = (e) => {
+      // Accumulate the streamed token
+      pageText += e.data
+
       setPages(prev => {
-        const newPages = [...prev, { text: data.page, image: data.image_url }]
+        const newPages = [...prev]
+
+        if (!pageInitialised) {
+          newPages.push({ text: pageText, image: null })
+          pageInitialised = true
+        } else {
+          newPages[newPages.length - 1].text = pageText
+        }
+
         setCurrentIndex(newPages.length - 1)
         return newPages
       })
-      setChoices(data.choices)
-      setCustomChoice('')
-      setShowCustomInput(false)
-
-      // Update the book's page count in the local state
-      setBooks(prev => prev.map(book =>
-        book.id === targetBookId
-          ? { ...book, num_pages: book.num_pages + 1 }
-          : book
-      ))
-    } catch (err) {
-      console.error(err)
-      alert('Error generating page')
-    } finally {
-      setLoading(false)
     }
+
+    evtSource.addEventListener('choices', (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        if (data.choices) {
+          setChoices(data.choices)
+        }
+
+        // Update book list page count if it's a new page
+        setBooks(prev => prev.map(book =>
+          book.id === targetBookId
+            ? { ...book, num_pages: (book.num_pages || 0) + 1 }
+            : book
+        ))
+      } catch(err) {
+        console.error('Failed to parse choices event', err)
+      } finally {
+        setLoading(false)
+        evtSource.close()
+        setCustomChoice('')
+        setShowCustomInput(false)
+      }
+    })
+
+    evtSource.addEventListener('error', (e) => {
+      console.error('Streaming error', e)
+      setLoading(false)
+      evtSource.close()
+      alert('Error generating page')
+    })
   }
 
   function handleChoiceClick(choice) {
@@ -303,15 +341,6 @@ export default function App() {
     setCustomChoice('')
   }
 
-  function handleEditTitleSave() {
-    updateBookTitle(currentBookId, editingTitle.trim())
-  }
-
-  function handleEditTitleCancel() {
-    setShowEditTitle(false)
-    setEditingTitle('')
-  }
-
   useEffect(() => {
     loadBooks()
   }, [])
@@ -369,7 +398,6 @@ export default function App() {
     <>
       <div className="layout">
         <BookSidebar
-          currentBookTitle={currentBookTitle}
           pages={pages}
           currentIndex={currentIndex}
           onSwitchBook={() => setShowBookSelector(true)}
@@ -386,8 +414,7 @@ export default function App() {
           loading={loading}
           customChoice={customChoice}
           showCustomInput={showCustomInput}
-          onEditTitle={handleEditTitle}
-          onManageBook={handleManageBook}
+          onModelSelector={handleModelSelector}
           onPageNavigation={handlePageNavigation}
           onChoiceClick={handleChoiceClick}
           onCustomChoiceChange={handleCustomChoiceChange}
@@ -407,14 +434,6 @@ export default function App() {
         onCreateBook={createBook}
       />
 
-      <EditTitleModal
-        showEditTitle={showEditTitle}
-        editingTitle={editingTitle}
-        onEditingTitleChange={(e) => setEditingTitle(e.target.value)}
-        onSave={handleEditTitleSave}
-        onCancel={handleEditTitleCancel}
-      />
-
       <BookManagerDialog
         book={selectedBook}
         showDialog={showManageBook}
@@ -424,6 +443,13 @@ export default function App() {
         }}
         onBookDeleted={handleBookDeleted}
         onBookUpdated={handleBookUpdated}
+      />
+
+      <ModelSelector
+        show={showModelSelector}
+        selectedModelId={currentModelId}
+        onModelSelect={handleModelSelect}
+        onClose={() => setShowModelSelector(false)}
       />
     </>
   )
