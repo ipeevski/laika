@@ -1,4 +1,5 @@
 import React from 'react'
+import ReactMarkdown from 'react-markdown'
 import Spinner from './Spinner'
 
 export default function BookReader({
@@ -10,7 +11,7 @@ export default function BookReader({
   loading,
   customChoice,
   showCustomInput,
-  onEditTitle,
+  onModelSelector,
   onPageNavigation,
   onChoiceClick,
   onCustomChoiceChange,
@@ -25,15 +26,17 @@ export default function BookReader({
     <div className="container">
       <div className="title-container">
         <h1 className="title">{currentBookTitle || 'Book'}</h1>
-        {currentBookId && (
-          <button
-            onClick={onEditTitle}
-            className="edit-title-button"
-            title="Edit book title"
-          >
-            ✏️
-          </button>
-        )}
+        <div className="title-actions">
+          {onModelSelector && (
+            <button
+              onClick={onModelSelector}
+              className="model-selector-button"
+              title="Select AI Model"
+            >
+              🤖
+            </button>
+          )}
+        </div>
       </div>
 
       {currentIndex >= 0 && pages[currentIndex] && (
@@ -41,7 +44,9 @@ export default function BookReader({
           {pages[currentIndex].image && (
             <img src={pages[currentIndex].image} alt="illustration" />
           )}
-          <p>{pages[currentIndex].text}</p>
+          <ReactMarkdown>
+            {pages[currentIndex].text}
+          </ReactMarkdown>
         </div>
       )}
 
