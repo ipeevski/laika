@@ -220,8 +220,17 @@ export default function App() {
     setLastChoiceUsed(choice)
 
     evtSource.onmessage = (e) => {
+      // Tokens are JSON-encoded on the server so they can contain \n safely.
+      // Decode here; fallback to raw string for backward-compatibility.
+      let token = ''
+      try {
+        token = JSON.parse(e.data)
+      } catch {
+        token = e.data
+      }
+
       // Accumulate the streamed token
-      pageText += e.data
+      pageText += token
 
       setPages(prev => {
         const newPages = [...prev]

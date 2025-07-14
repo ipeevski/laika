@@ -348,8 +348,13 @@ async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, 
                 if await request.is_disconnected():
                     break
 
+                # JSON-encode the token so embedded newlines become \n and do not
+                # prematurely terminate the SSE data line. The browser will
+                # decode the JSON in the frontend.
+                safe_token = json.dumps(token)
+
                 page_buffer += token
-                yield f"data: {token}\n\n"
+                yield f"data: {safe_token}\n\n"
 
             # After page finished, generate choices ----------------------
             choices_list = _generate_choices(page_buffer, model_id)
