@@ -4,7 +4,6 @@ import Spinner from './Spinner'
 
 export default function BookReader({
   currentBookTitle,
-  currentBookId,
   pages,
   currentIndex,
   choices,
@@ -49,7 +48,7 @@ export default function BookReader({
           <ReactMarkdown
             components={{
               p: ({node, ...props}) => (
-                <p style={{whiteSpace: 'pre-line'}} {...props} />
+                <p {...props} />
               )
             }}
           >

@@ -100,6 +100,16 @@ body {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
+.page p {
+  margin: 0 0 1rem 0;
+  line-height: 1.6;
+  white-space: pre-line;
+}
+
+.page p:last-child {
+  margin-bottom: 0;
+}
+
 .page img {
   width: 100%;
   border-radius: 6px;
