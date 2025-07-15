@@ -9,7 +9,7 @@ export default function BookSelector({ books, onSelectBook, onBack, onCreateNew,
   const [showManageDialog, setShowManageDialog] = useState(false)
   const [selectedBook, setSelectedBook] = useState(null)
 
-  // Extract unique tags from books (for future implementation)
+  // Extract unique tags from books
   const allTags = []
   books.forEach(book => {
     if (book.tags) {

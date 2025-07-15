@@ -45,9 +45,11 @@ export default function WelcomeScreen({ onStartNew, onContinueExisting, books, l
                   className="recent-book-item"
                   onClick={() => onLoadBook(book.id)}
                 >
-                  <div className="recent-book-title">{book.title}</div>
                   <div className="recent-book-info">
-                    {book.num_pages} pages • Updated {new Date(book.updated_at).toLocaleDateString()}
+                    <div className="recent-book-title">{book.title}</div>
+                    <div className="recent-book-meta">
+                      {book.num_pages} pages • Updated {new Date(book.updated_at).toLocaleDateString()}
+                    </div>
                   </div>
                 </div>
               ))}

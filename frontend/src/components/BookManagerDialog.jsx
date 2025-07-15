@@ -248,21 +248,27 @@ export default function BookManagerDialog({
         {showDeleteConfirm && (
           <div className="modal-overlay delete-confirm-overlay">
             <div className="modal delete-confirm-modal">
-              <h3>Delete Book</h3>
-              <p>
-                Are you sure you want to delete "{book.title}"?
-                This action cannot be undone.
-              </p>
-              <div className="modal-buttons">
+              <div className="modal-header">
+                <h3>Delete Book</h3>
+              </div>
+              <div className="modal-content">
+                <p>Are you sure you want to delete "{book.title}"?</p>
+                <p>This action cannot be undone.</p>
+              </div>
+              <div className="modal-footer">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="secondary-button"
+                  disabled={deleting}
+                >
+                  Cancel
+                </button>
                 <button
                   onClick={handleDelete}
-                  disabled={deleting}
                   className="delete-confirm-button"
+                  disabled={deleting}
                 >
-                  {deleting ? 'Deleting...' : 'Delete'}
-                </button>
-                <button onClick={() => setShowDeleteConfirm(false)} disabled={deleting}>
-                  Cancel
+                  {deleting ? 'Deleting...' : 'Yes, Delete'}
                 </button>
               </div>
             </div>

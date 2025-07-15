@@ -173,6 +173,11 @@ export default function ModelSelector({
                     <span className={`tag ${getContentLevelColor(model.content_level)}`}>
                       {model.content_level}
                     </span>
+                    {model.thinking_model && (
+                      <span className="tag tag-thinking">
+                        thinking
+                      </span>
+                    )}
                     {model.tags.slice(0, 3).map(tag => (
                       <span key={tag} className="tag tag-blue">
                         {tag}

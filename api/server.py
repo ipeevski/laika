@@ -8,7 +8,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from .agent import Agent
-from .book import BookInfo, BookManager, Book, BookMetadata
+from .book import BookInfo, BookManager, Book
 from .models import model_manager
 
 from dotenv import load_dotenv
@@ -121,16 +121,18 @@ async def chat_endpoint(req: ChatRequest):
     if not summary_text.strip() and req.choice is None:
         initial_idea = book.metadata.settings.get("initial_idea")
 
+    # Build the prompt for this request
+    prompt = _build_page_only_prompt(summary_text, req.choice, initial_idea)
+
     data = call_llm(summary_text, req.choice, initial_idea, req.model_id)
 
     page = data.get("page", "")
     choices = data.get("choices", [])[:3]
 
     if req.regenerate and book.pages:
-        book.replace_last_page(page, choices)
+        book.replace_last_page(page, choices, prompt, req.choice)
     else:
-        book.add_page(page, choices)
-    book.update_summary(page)
+        book.add_page(page, choices, prompt, req.choice)
 
     return ChatResponse(book_id=book_id, page=page, choices=choices)
 
@@ -182,11 +184,11 @@ async def update_book_endpoint(book_id: str, req: UpdateBookRequest):
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Book not found")
 
-@app.get("/api/books/{book_id}/metadata", response_model=BookMetadata)
+@app.get("/api/books/{book_id}/metadata", response_model=BookInfo)
 async def get_book_metadata_endpoint(book_id: str):
     try:
         book = Book(book_id)
-        return book.metadata
+        return book.book_info
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -216,6 +218,53 @@ async def get_book_summary_endpoint(book_id: str):
 @app.get("/api/books/{book_id}/pages")
 async def get_book_pages_endpoint(book_id: str):
     return {"pages": Book(book_id).get_page_texts()}
+
+@app.get("/api/books/{book_id}/prompts")
+async def get_book_prompts_endpoint(book_id: str):
+    try:
+        book = Book(book_id)
+        return {"prompts": book.get_page_prompts()}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.get("/api/books/{book_id}/prompts/{page_index}")
+async def get_book_page_prompt_endpoint(book_id: str, page_index: int):
+    try:
+        book = Book(book_id)
+        prompt = book.get_page_prompt(page_index)
+        if not prompt:
+            raise HTTPException(status_code=404, detail="Prompt not found")
+        return {"prompt": prompt}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.get("/api/books/{book_id}/choice-used/{page_index}")
+async def get_book_page_choice_used_endpoint(book_id: str, page_index: int):
+    try:
+        book = Book(book_id)
+        choice_used = book.get_page_choice_used(page_index)
+        return {"choice_used": choice_used}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.post("/api/books/{book_id}/commit")
+async def commit_page_endpoint(book_id: str):
+    """Commit the last page to the summary"""
+    try:
+        book = Book(book_id)
+        if not book.book_info.pages:
+            raise HTTPException(status_code=400, detail="No pages to commit")
+
+        last_page = book.book_info.pages[-1]
+        if isinstance(last_page, dict):
+            page_text = last_page["text"]
+        else:
+            page_text = last_page
+
+        book.update_summary(page_text)
+        return {"detail": "Page committed to summary"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
 
 # ====== Model management endpoints ======
 @app.get("/api/models")
@@ -312,7 +361,7 @@ async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, 
 
     initial_idea = None
     if not summary_text.strip() and choice is None:
-        initial_idea = book.metadata.settings.get("initial_idea")
+        initial_idea = book.book_info.settings.get("initial_idea")
 
     prompt = _build_page_only_prompt(summary_text, choice, initial_idea)
 
@@ -338,9 +387,14 @@ async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, 
         temperature=model_config.temperature or 0.8
     )
 
-    # Streaming generator ---------------------------------------------------
+                                            # Streaming generator ---------------------------------------------------
     async def event_generator():
         page_buffer = ""
+        thinking_buffer = ""
+        in_thinking_section = False
+        in_answer_section = False
+        token_buffer = ""
+        token_queue = []  # Queue to delay token sending
 
         try:
             for token in agent.stream(prompt):
@@ -348,23 +402,105 @@ async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, 
                 if await request.is_disconnected():
                     break
 
-                # JSON-encode the token so embedded newlines become \n and do not
-                # prematurely terminate the SSE data line. The browser will
-                # decode the JSON in the frontend.
-                safe_token = json.dumps(token)
+                # Handle thinking model tokens
+                if model_config.thinking_model:
+                    # Add token to buffer for pattern matching
+                    token_buffer += token
 
-                page_buffer += token
-                yield f"data: {safe_token}\n\n"
+                    # Check for thinking section start
+                    if "<think>" in token_buffer and not in_thinking_section:
+                        in_thinking_section = True
+                        # Send thinking indicator to frontend
+                        yield f"event: thinking\ndata: {json.dumps({'thinking': True})}\n\n"
+                        # Remove the <think> tag from buffer
+                        token_buffer = token_buffer.replace("<think>", "", 1)
+                        # Clear the token queue since we're entering thinking mode
+                        token_queue.clear()
+                        continue
+
+                                        # Check for thinking section end
+                    if "</think>" in token_buffer and in_thinking_section:
+                        in_thinking_section = False
+                        # Send thinking end indicator
+                        yield f"event: thinking\ndata: {json.dumps({'thinking': False})}\n\n"
+                        # Remove the </think> tag from buffer
+                        token_buffer = token_buffer.replace("</think>", "", 1)
+                        # Clear the token queue since we're exiting thinking mode
+                        token_queue.clear()
+                        continue
+
+                    # Check for answer section start
+                    if "<answer>" in token_buffer and not in_answer_section:
+                        in_answer_section = True
+                        # Remove the <answer> tag from buffer
+                        token_buffer = token_buffer.replace("<answer>", "", 1)
+                        # Clear the token queue since we're entering answer mode
+                        token_queue.clear()
+                        continue
+
+                    # Check for answer section end
+                    if "</answer>" in token_buffer and in_answer_section:
+                        in_answer_section = False
+                        # Remove the </answer> tag from buffer
+                        token_buffer = token_buffer.replace("</answer>", "", 1)
+                        # Clear the token queue since we're exiting answer mode
+                        token_queue.clear()
+                        continue
+
+                    # Accumulate tokens based on current section
+                    if in_thinking_section:
+                        thinking_buffer += token
+                        # Don't send thinking tokens to frontend and don't accumulate in page_buffer
+                        continue
+                    elif in_answer_section:
+                        # Only accumulate answer tokens
+                        page_buffer += token
+                    else:
+                        # If not in any special section, accumulate normally
+                        page_buffer += token
+                else:
+                    # Non-thinking model: accumulate all tokens normally
+                    page_buffer += token
+
+                # Only send tokens to frontend if we're not in thinking section
+                if not (model_config.thinking_model and in_thinking_section):
+                    # For thinking models, use a delay queue to avoid sending partial tags
+                    if model_config.thinking_model:
+                        token_queue.append(token)
+                        # Send tokens with a 3-token delay to ensure we can detect complete tags
+                        if len(token_queue) >= 3:
+                            # Send the oldest token in the queue
+                            safe_token = json.dumps(token_queue.pop(0))
+                            yield f"data: {safe_token}\n\n"
+                    else:
+                        # Non-thinking model: send immediately
+                        safe_token = json.dumps(token)
+                        yield f"data: {safe_token}\n\n"
+
+                        # After page finished, send any remaining tokens in the queue
+            if model_config.thinking_model and token_queue:
+                for queued_token in token_queue:
+                    safe_token = json.dumps(queued_token)
+                    yield f"data: {safe_token}\n\n"
 
             # After page finished, generate choices ----------------------
-            choices_list = _generate_choices(page_buffer, model_id)
+            # For thinking models, clean up any remaining tags and use only the answer portion
+            final_page_text = page_buffer.strip()
 
-            # Save or replace page in book
+            if model_config.thinking_model:
+                # Remove any remaining thinking or answer tags
+                final_page_text = final_page_text.replace("<think>", "").replace("</think>", "")
+                final_page_text = final_page_text.replace("<answer>", "").replace("</answer>", "")
+                final_page_text = final_page_text.strip()
+
+            choices_list = _generate_choices(final_page_text, model_id)
+
+            # Save or replace page in book (but don't update summary yet)
             if regenerate and book.pages:
-                book.replace_last_page(page_buffer, choices_list)
+                book.replace_last_page(final_page_text, choices_list, prompt, choice)
             else:
-                book.add_page(page_buffer, choices_list)
-            book.update_summary(page_buffer)
+                book.add_page(final_page_text, choices_list, prompt, choice)
+            # Note: Summary is NOT updated here - it will be updated when user commits the page
 
             # Send choices event
             choices_json = json.dumps({"choices": choices_list, "book_id": bid})

@@ -13,9 +13,11 @@ export default function App() {
   const [pages, setPages] = useState([])
   const [currentIndex, setCurrentIndex] = useState(-1)
   const [choices, setChoices] = useState([])
+  const [prompts, setPrompts] = useState([])
   const [loading, setLoading] = useState(false)
   const [customChoice, setCustomChoice] = useState('')
   const [showCustomInput, setShowCustomInput] = useState(false)
+  const [showPrompts, setShowPrompts] = useState(false)
   const [books, setBooks] = useState([])
   const [currentBookId, setCurrentBookId] = useState(null)
   const [currentBookTitle, setCurrentBookTitle] = useState('')
@@ -30,6 +32,9 @@ export default function App() {
   const [showModelSelector, setShowModelSelector] = useState(false)
   const [currentModelId, setCurrentModelId] = useState(null)
   const [lastChoiceUsed, setLastChoiceUsed] = useState(null)
+  const [showCustomPromptInput, setShowCustomPromptInput] = useState(false)
+  const [customPrompt, setCustomPrompt] = useState('')
+  const [isThinking, setIsThinking] = useState(false)
   const streamRef = useRef(null)
 
   async function loadBooks() {
@@ -161,6 +166,15 @@ export default function App() {
         console.warn('Failed to load pages:', pagesRes.status)
       }
 
+      // Load prompts for this book
+      const promptsRes = await fetch(`${API_BASE}/api/books/${bookId}/prompts`)
+      if (promptsRes.ok) {
+        const promptsData = await promptsRes.json()
+        setPrompts(promptsData.prompts)
+      } else {
+        setPrompts([])
+      }
+
       // Load choices for this book
       if (pagesData.pages.length > 0) {
         // Load current choices for the book
@@ -187,11 +201,29 @@ export default function App() {
     }
   }
 
-  function sendChoice(choice = null, bookId = null, regenerate = false) {
+  async function sendChoice(choice = null, bookId = null, regenerate = false) {
     const targetBookId = bookId || currentBookId
     if (!targetBookId) {
       console.error('No active book to send choice')
       return
+    }
+
+    // If this is a new choice (not regeneration), commit the current page first
+    if (!regenerate && pages.length > 0) {
+      try {
+        const commitRes = await fetch(`${API_BASE}/api/books/${targetBookId}/commit`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' }
+        })
+
+        if (commitRes.ok) {
+          console.log('Current page committed to summary')
+        } else {
+          console.error('Failed to commit current page')
+        }
+      } catch (err) {
+        console.error('Error committing current page:', err)
+      }
     }
 
     setLoading(true)
@@ -249,6 +281,27 @@ export default function App() {
       })
     }
 
+    evtSource.addEventListener('thinking', (e) => {
+      try {
+        const data = JSON.parse(e.data)
+        setIsThinking(data.thinking)
+
+        // Clear the page when thinking starts
+        if (data.thinking) {
+          setPages(prev => {
+            const newPages = [...prev]
+            if (newPages.length > 0) {
+              // Clear the current page content
+              newPages[newPages.length - 1].text = ''
+            }
+            return newPages
+          })
+        }
+      } catch(err) {
+        console.error('Failed to parse thinking event', err)
+      }
+    })
+
     evtSource.addEventListener('choices', (e) => {
       try {
         const data = JSON.parse(e.data)
@@ -268,6 +321,7 @@ export default function App() {
         console.error('Failed to parse choices event', err)
       } finally {
         setLoading(false)
+        setIsThinking(false)
         evtSource.close()
         streamRef.current = null
         setCustomChoice('')
@@ -278,16 +332,53 @@ export default function App() {
     evtSource.addEventListener('error', (e) => {
       console.error('Streaming error', e)
       setLoading(false)
+      setIsThinking(false)
       evtSource.close()
       streamRef.current = null
       alert('Error generating page')
     })
   }
 
+
+
   function handleRegenerate() {
     if (loading) return
     // Use the last choice (may be null for the first page)
     sendChoice(lastChoiceUsed, null, true)
+  }
+
+        async function handleRegenerateWithPrompt(customChoice = null) {
+    if (loading) return
+
+    // If no custom choice provided, show the input UI with last choice preloaded
+    if (customChoice === null) {
+      // Try to get the choice from the book data for the current page
+      let defaultChoice = lastChoiceUsed || ''
+
+      if (currentBookId && pages.length > 0) {
+        try {
+          const res = await fetch(`${API_BASE}/api/books/${currentBookId}/choice-used/${pages.length - 1}`)
+          if (res.ok) {
+            const data = await res.json()
+            defaultChoice = data.choice_used || lastChoiceUsed || ''
+          }
+        } catch (err) {
+          console.error('Failed to load choice used:', err)
+          defaultChoice = lastChoiceUsed || ''
+        }
+      }
+
+      console.log('Preloading custom choice with:', defaultChoice)
+      setCustomPrompt(defaultChoice)
+      setShowCustomPromptInput(true)
+      return
+    }
+
+    // Use the custom choice (or last choice if empty) for regeneration
+    const choiceToUse = customChoice.trim() || lastChoiceUsed
+    if (choiceToUse) {
+      sendChoice(choiceToUse, null, true)
+    }
   }
 
   function handleStopGeneration() {
@@ -394,6 +485,25 @@ export default function App() {
     setCustomChoice('')
   }
 
+  function handleTogglePrompts() {
+    setShowPrompts(!showPrompts)
+  }
+
+  function handleCustomPromptChange(e) {
+    setCustomPrompt(e.target.value)
+  }
+
+  function handleCustomPromptSubmit() {
+    handleRegenerateWithPrompt(customPrompt.trim())
+    setShowCustomPromptInput(false)
+    setCustomPrompt('')
+  }
+
+  function handleCustomPromptCancel() {
+    setShowCustomPromptInput(false)
+    setCustomPrompt('')
+  }
+
   useEffect(() => {
     loadBooks()
   }, [])
@@ -464,18 +574,28 @@ export default function App() {
           pages={pages}
           currentIndex={currentIndex}
           choices={choices}
+          prompts={prompts}
+          showPrompts={showPrompts}
           loading={loading}
+          isThinking={isThinking}
           customChoice={customChoice}
           showCustomInput={showCustomInput}
+          showCustomPromptInput={showCustomPromptInput}
+          customPrompt={customPrompt}
           onModelSelector={handleModelSelector}
           onPageNavigation={handlePageNavigation}
           onChoiceClick={handleChoiceClick}
           onRegenerate={handleRegenerate}
+          onRegenerateWithPrompt={handleRegenerateWithPrompt}
           onStopGeneration={handleStopGeneration}
           onCustomChoiceChange={handleCustomChoiceChange}
           onCustomChoiceSubmit={handleCustomChoiceSubmit}
           onToggleCustomInput={handleToggleCustomInput}
           onCustomChoiceCancel={handleCustomChoiceCancel}
+          onTogglePrompts={handleTogglePrompts}
+          onCustomPromptChange={handleCustomPromptChange}
+          onCustomPromptSubmit={handleCustomPromptSubmit}
+          onCustomPromptCancel={handleCustomPromptCancel}
         />
       </div>
 

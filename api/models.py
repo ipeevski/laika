@@ -13,6 +13,7 @@ class ModelConfig(BaseModel):
     temperature: float
     tags: List[str] = []
     system_prompt_modifier: Optional[str] = None
+    thinking_model: bool = False
 
 class ModelManager:
 

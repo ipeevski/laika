@@ -9,6 +9,7 @@ class Agent:
         self.temperature = temperature
 
     def call(self, prompt, max_retries=3) -> str:
+        print("Using model: ", self.model)
         messages = [
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt}
@@ -63,6 +64,7 @@ class Agent:
             {"role": "user", "content": prompt}
         ]
 
+        print("Streaming with model: ", self.model)
         stream = completion(
             model=self.model,
             messages=messages,
