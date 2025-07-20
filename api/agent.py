@@ -81,6 +81,92 @@ class Agent:
             if token:
                 yield token
 
+    def process_stream(self, prompt: str, thinking_model: bool):
+        """Yield tuples (event_type, data) from a streaming call.
+
+        event_type is one of:
+          - "token": regular content token (data=str)
+          - "thinking": thinking status changed (data=True/False)
+
+        The method also assembles and returns the full reply text once the
+        stream ends via StopIteration value.
+        """
+        stream = completion(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": self.system_prompt},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=self.temperature,
+            stream=True,
+        )
+
+        page_buffer = ""
+        token_buffer = ""
+        in_thinking_section = False
+        in_answer_section = False
+
+        token_queue = []
+
+        for chunk in stream:
+            delta = chunk["choices"][0].get("delta", {})
+            token = delta.get("content")
+            if not token:
+                continue
+
+            if thinking_model:
+                token_buffer += token
+
+                if "<think>" in token_buffer and not in_thinking_section:
+                    in_thinking_section = True
+                    token_buffer = token_buffer.replace("<think>", "", 1)
+                    yield ("thinking", True)
+                    token_queue.clear()
+                    continue
+
+                if "</think>" in token_buffer and in_thinking_section:
+                    in_thinking_section = False
+                    token_buffer = token_buffer.replace("</think>", "", 1)
+                    yield ("thinking", False)
+                    token_queue.clear()
+                    continue
+
+                if "<answer>" in token_buffer and not in_answer_section:
+                    in_answer_section = True
+                    token_buffer = token_buffer.replace("<answer>", "", 1)
+                    token_queue.clear()
+                    continue
+
+                if "</answer>" in token_buffer and in_answer_section:
+                    in_answer_section = False
+                    token_buffer = token_buffer.replace("</answer>", "", 1)
+                    token_queue.clear()
+                    continue
+
+                if in_thinking_section:
+                    # skip sending thinking tokens
+                    continue
+                else:
+                    page_buffer += token
+                    # Delay sending tokens slightly to avoid partial tag leaks
+                    token_queue.append(token)
+                    if len(token_queue) >= 3:
+                        yield ("token", token_queue.pop(0))
+            else:
+                page_buffer += token
+                yield ("token", token)
+
+        # flush remaining queue
+        for t in token_queue:
+            yield ("token", t)
+
+        # Clean tags from final text
+        if thinking_model:
+            page_buffer = page_buffer.replace("<think>", "").replace("</think>", "")
+            page_buffer = page_buffer.replace("<answer>", "").replace("</answer>", "")
+
+        return page_buffer.strip()
+
     def _parse_json(self, content: str) -> dict:
             start, end = content.find("{"), content.rfind("}")
             if start == -1 or end == -1:

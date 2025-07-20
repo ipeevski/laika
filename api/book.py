@@ -33,21 +33,16 @@ class Book:
         self._load_data()
 
     def _find_file(self) -> Path:
-        """Find the JSON file for this book"""
+        """Find the JSON file for this book by matching the book ID suffix"""
         book_dir = self.get_dir()
         if not book_dir.exists():
             return None
 
-        # Look for file pattern: title_id.json
-        files = list(book_dir.glob("*_*.json"))
-        if files:
-            return files[0]
-
-        # Fallback: look for any JSON file that might be the book file
-        json_files = list(book_dir.glob("*.json"))
-        if json_files:
-            return json_files[0]
-
+        expected_suffix = f"_{self.id}.json"
+        for file in book_dir.glob("*_*.json"):
+            if file.name.endswith(expected_suffix):
+                return file
+        # No matching file
         return None
 
     def _load_data(self):
@@ -225,9 +220,34 @@ class Book:
     def get_summary(self) -> str:
         return self.book_info.summary
 
-    def update_summary(self, addition: str) -> None:
-        self.book_info.summary += addition
+    def _regenerate_summary(self):
+        """Regenerate the full book summary (placeholder implementation)."""
+        texts = [p["text"] if isinstance(p, dict) else p for p in self.book_info.pages]
+        self.book_info.summary = "\n".join(texts[-3:])  # naive: last 3 pages
+
+    def regenerate_summary(self):
+        self._regenerate_summary()
         self._save_data()
+
+    def update_page_text(self, index: int, new_text: str):
+        """Replace a page's text and refresh summary placeholders."""
+        if index < 0 or index >= len(self.book_info.pages):
+            raise IndexError("Page index out of range")
+        page_entry = self.book_info.pages[index]
+        if isinstance(page_entry, dict):
+            page_entry["text"] = new_text
+        else:
+            self.book_info.pages[index] = new_text
+        # simplistic summary update – append notice
+        self.book_info.summary += f"\n[Page {index}] updated."
+        self.regenerate_summary()
+
+    def get_meta(self):
+        return {
+            "summary": self.book_info.summary,
+            "characters": self.book_info.characters,
+            "key_events": self.book_info.key_events,
+        }
 
     def get_dir(self) -> Path:
         path = BOOKS_DIR

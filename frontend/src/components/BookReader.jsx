@@ -1,7 +1,9 @@
-import React from 'react'
+import React, { useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import Spinner from './Spinner'
 import ThinkingIndicator from './ThinkingIndicator'
+import PageEditor from './PageEditor'
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 export default function BookReader({
   currentBookTitle,
@@ -29,10 +31,29 @@ export default function BookReader({
   onTogglePrompts,
   onCustomPromptChange,
   onCustomPromptSubmit,
-  onCustomPromptCancel
+  onCustomPromptCancel,
+  onOpenSettings,
+  onOpenInsights = null,
+  onPageUpdated,
+  currentBookId,
 }) {
   const goPrev = () => onPageNavigation('prev')
   const goNext = () => onPageNavigation('next')
+
+  const [editing, setEditing] = useState(false)
+
+  const handleSaveEdit = async (newText) => {
+    try {
+      const res = await fetch(`${API_BASE}/api/books/${currentBookId}/pages/${currentIndex}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:newText})
+      })
+      if(res.ok){
+        pages[currentIndex].text = newText
+        onPageUpdated && onPageUpdated(currentIndex, newText)
+        setEditing(false)
+      }
+    }catch(err){console.error('save page',err)}
+  }
 
   return (
     <div className="container">
@@ -48,6 +69,8 @@ export default function BookReader({
               🤖
             </button>
           )}
+          <button onClick={onOpenSettings} className="model-selector-button" title="Settings">⚙️</button>
+          {onOpenInsights && (<button onClick={onOpenInsights} className="model-selector-button" title="Story Insights">📖</button>)}
           <button
             onClick={onTogglePrompts}
             className="prompt-toggle-button"
@@ -120,6 +143,9 @@ export default function BookReader({
           <button onClick={onStopGeneration} title="Stop generation">
             ⏹ Stop
           </button>
+        )}
+        {currentIndex>=0 && (
+          <button onClick={()=>setEditing(true)} title="Edit page">✏️ Edit</button>
         )}
       </div>
 
@@ -206,6 +232,7 @@ export default function BookReader({
           </div>
         </div>
       )}
+      <PageEditor show={editing} pageText={pages[currentIndex]?.text} onSave={handleSaveEdit} onClose={()=>setEditing(false)} />
     </div>
   )
 }

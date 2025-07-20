@@ -6,6 +6,11 @@ import BookSidebar from './components/BookSidebar'
 import BookReader from './components/BookReader'
 import BookManagerDialog from './components/BookManagerDialog'
 import ModelSelector from './components/ModelSelector'
+import ChatInterface from './components/ChatInterface'
+import PersonaSelector from './components/PersonaSelector'
+import ChatList from './components/ChatList'
+import SettingsDialog from './components/SettingsDialog'
+import StoryInsights from './components/StoryInsights'
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
@@ -36,6 +41,18 @@ export default function App() {
   const [customPrompt, setCustomPrompt] = useState('')
   const [isThinking, setIsThinking] = useState(false)
   const streamRef = useRef(null)
+  const [chatMode, setChatMode] = useState(false)
+  const [persona, setPersona] = useState(null)
+  const [showPersonaSelector, setShowPersonaSelector] = useState(false)
+  const [showChatList, setShowChatList] = useState(false)
+  const [conversationData, setConversationData] = useState(null)
+  const [showSettings, setShowSettings] = useState(false)
+  const [settingsMode, setSettingsMode] = useState('story')
+  const chatRef = useRef(null)
+  const [showInsights, setShowInsights] = useState(false)
+  const [meta, setMeta] = useState(null)
+
+  function openSettings(mode){ setSettingsMode(mode); setShowSettings(true) }
 
   async function loadBooks() {
     try {
@@ -63,6 +80,12 @@ export default function App() {
         setBooks(prev => [...prev, newBook])
         setCurrentBookId(newBook.id)
         setCurrentBookTitle(newBook.title)
+        // reset previous reading state
+        setPages([])
+        setCurrentIndex(-1)
+        setChoices([])
+        setPrompts([])
+        setLastChoiceUsed(null)
         setShowCreateBook(false)
         setNewBookTitle('')
         setNewBookIdea('')
@@ -152,6 +175,7 @@ export default function App() {
 
       setCurrentBookId(bookId)
       setCurrentBookTitle(bookData.title)
+      await fetchMeta(bookId)
 
       // Load pages for this book
       const pagesRes = await fetch(`${API_BASE}/api/books/${bookId}/pages`)
@@ -235,7 +259,7 @@ export default function App() {
     if (currentModelId) params.append('model_id', currentModelId)
     if (regenerate) params.append('regenerate', '1')
 
-    const streamUrl = `${API_BASE}/api/chat/stream?${params.toString()}`
+    const streamUrl = `${API_BASE}/api/story/stream?${params.toString()}`
 
     let pageText = ''
     let pageInitialised = regenerate ? true : false
@@ -504,9 +528,65 @@ export default function App() {
     setCustomPrompt('')
   }
 
+  function handleStartChat() {
+    setPersona(null)
+    setConversationData(null)
+    setShowPersonaSelector(true)
+    setShowWelcome(false)
+  }
+
+  function handleContinueChat() { setShowChatList(true); setShowWelcome(false) }
+
+  function handlePersonaSelected(p) {
+    setPersona(p)
+    setShowPersonaSelector(false)
+    setChatMode(true)
+  }
+
+  function handlePageUpdated(idx, txt){
+    setPages(prev=>{ const cp=[...prev]; cp[idx].text=txt; return cp })
+    if(currentBookId) fetchMeta(currentBookId)
+  }
+
+  async function fetchMeta(bid){
+    try{ const r=await fetch(`${API_BASE}/api/books/${bid}/meta`); if(r.ok){ setMeta(await r.json()) }}catch{}
+  }
+
   useEffect(() => {
     loadBooks()
   }, [])
+
+  // Show chat mode immediately
+  if (chatMode) {
+    return (
+      <>
+        <ChatInterface
+          ref={chatRef}
+          initialPersona={persona}
+          initialConversation={conversationData}
+          selectedModelId={currentModelId}
+          onModelSelector={handleModelSelector}
+          onExit={() => {
+            setChatMode(false)
+            setShowWelcome(true)
+          }}
+          onOpenSettings={()=>openSettings('chat')}
+        />
+        <SettingsDialog show={showSettings && settingsMode==='chat'} mode="chat" onClose={()=>setShowSettings(false)} onOpenPersonaManager={()=>{setShowSettings(false); chatRef.current?.openPersonaDialog();}} />
+        <ModelSelector
+          show={showModelSelector}
+          selectedModelId={currentModelId}
+          onModelSelect={handleModelSelect}
+          onClose={() => setShowModelSelector(false)}
+        />
+        <PersonaSelector
+          show={showPersonaSelector}
+          onSelect={handlePersonaSelected}
+          onClose={()=>setShowPersonaSelector(false)}
+        />
+      </>
+    )
+  }
 
   // Show welcome screen until user makes a choice
   if (showWelcome) {
@@ -515,10 +595,14 @@ export default function App() {
         <WelcomeScreen
           onStartNew={handleStartNew}
           onContinueExisting={handleContinueExisting}
+          onStartChat={handleStartChat}
+          onContinueChat={handleContinueChat}
           books={books}
           loading={initialLoading}
           onLoadBook={loadBook}
+          onOpenSettings={()=>openSettings('story')}
         />
+        <SettingsDialog show={showSettings && settingsMode==='story'} mode="story" onClose={()=>setShowSettings(false)} />
         <BookManager
           showCreateBook={showCreateBook}
           setShowCreateBook={setShowCreateBook}
@@ -529,6 +613,20 @@ export default function App() {
           onCreateBook={createBook}
         />
       </>
+    )
+  }
+
+  // Show persona selector if needed
+  if (showPersonaSelector) {
+    return (
+      <PersonaSelector
+        show={showPersonaSelector}
+        onSelect={handlePersonaSelected}
+        onClose={() => {
+          setShowPersonaSelector(false)
+          setShowWelcome(true)
+        }}
+      />
     )
   }
 
@@ -554,6 +652,36 @@ export default function App() {
           onCreateBook={createBook}
         />
       </>
+    )
+  }
+
+  // Show chat list if user chooses to continue existing chat
+  if (showChatList) {
+    return (
+      <ChatList
+        show={showChatList}
+        onSelect={async (chatMeta) => {
+          if(!chatMeta){
+             setShowChatList(false);
+             handleStartChat();
+             return;
+          }
+          // fetch conversation
+          try {
+            const res = await fetch(`${API_BASE}/api/chat/${chatMeta.id}`)
+            if (res.ok) {
+              const data = await res.json()
+              const personaRes = await fetch(`${API_BASE}/api/personas/${data.persona_id}`)
+              const personaData = personaRes.ok ? await personaRes.json() : null
+              setPersona(personaData)
+              setChatMode(true)
+              setShowChatList(false)
+              setConversationData(data)
+            }
+          } catch(err) { console.error('load chat failed',err) }
+        }}
+        onClose={() => { setShowChatList(false); setShowWelcome(true) }}
+      />
     )
   }
 
@@ -596,6 +724,9 @@ export default function App() {
           onCustomPromptChange={handleCustomPromptChange}
           onCustomPromptSubmit={handleCustomPromptSubmit}
           onCustomPromptCancel={handleCustomPromptCancel}
+          onOpenSettings={()=>openSettings('story')}
+          onPageUpdated={handlePageUpdated}
+          onOpenInsights={()=>setShowInsights(true)}
         />
       </div>
 
@@ -626,6 +757,8 @@ export default function App() {
         onModelSelect={handleModelSelect}
         onClose={() => setShowModelSelector(false)}
       />
+      <SettingsDialog show={showSettings && settingsMode==='story'} mode="story" onClose={()=>setShowSettings(false)} />
+      <StoryInsights show={showInsights} bookId={currentBookId} meta={meta} onClose={()=>setShowInsights(false)} />
     </>
   )
 }

@@ -1,8 +1,9 @@
 from typing import List, Optional
 import uuid
 import json
+from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -10,6 +11,8 @@ from pydantic import BaseModel
 from .agent import Agent
 from .book import BookInfo, BookManager, Book
 from .models import model_manager
+from .persona import Persona, Conversation, _save_json
+from .prompts import get_prompt, set_prompt
 
 from dotenv import load_dotenv
 
@@ -23,16 +26,7 @@ def call_llm(summary_text: str, choice: Optional[str], initial_idea: Optional[st
         model_config = model_manager.get_default_model()
 
     # Build the system prompt
-    base_system_prompt = (
-        "You are a creative writer helping the user craft a choose-your-own-adventure book. "
-        "Respond strictly in valid JSON with the following keys: \n"
-        "page: the next ~300-400 word page of the book.\n"
-        "choices: an array of exactly 3 short distinct reader choices.\n"
-        "summary_update: a concise bullet list of new characters or key events in this page.\n"
-        "image_prompt: a vivid, concise description to illustrate the current page.\n"
-        "IMPORTANT: within JSON string values, escape newlines as \\n instead of raw line breaks.\n"
-        "Do NOT wrap the JSON in markdown code fences and do not add any additional keys."
-    )
+    base_system_prompt = get_prompt("story")
 
     # Add model-specific modifier if available
     if model_config.system_prompt_modifier:
@@ -110,22 +104,22 @@ class UpdateBookRequest(BaseModel):
     tags: Optional[List[str]] = None
 
 
-@app.post("/api/chat", response_model=ChatResponse)
-async def chat_endpoint(req: ChatRequest):
+# -------------- BOOK (choose-your-own adventure) ENDPOINTS --------------
+
+@app.post("/api/story", response_model=ChatResponse, name="create-story-page")
+async def story_endpoint(req: ChatRequest):
+    # identical logic to previous chat_endpoint but path renamed
     book_id = req.book_id or str(uuid.uuid4())
     book = Book(book_id)
     summary_text = book.get_summary()
 
-    # Get initial idea if this is the first page (no summary yet)
     initial_idea = None
     if not summary_text.strip() and req.choice is None:
         initial_idea = book.metadata.settings.get("initial_idea")
 
-    # Build the prompt for this request
     prompt = _build_page_only_prompt(summary_text, req.choice, initial_idea)
 
     data = call_llm(summary_text, req.choice, initial_idea, req.model_id)
-
     page = data.get("page", "")
     choices = data.get("choices", [])[:3]
 
@@ -136,6 +130,115 @@ async def chat_endpoint(req: ChatRequest):
 
     return ChatResponse(book_id=book_id, page=page, choices=choices)
 
+
+# -----------------------------------------------------------------------
+# Helper functions for story generation prompts and choice generation
+# -----------------------------------------------------------------------
+
+def _build_page_only_prompt(summary_text: str, choice: Optional[str], initial_idea: Optional[str] = None) -> str:
+    """Return a prompt instructing the model to generate ONLY the next page text."""
+    base_prompt = (
+        "You are a creative writer helping the user craft a choose-your-own-adventure book. "
+        "Generate the next ~300-400 word page of the book ONLY. Do not include any JSON or additional commentary, just the story text."
+    )
+
+    prompt = "\n\n" + base_prompt + "\n\n"
+
+    if summary_text.strip():
+        prompt += f"Book summary so far:\n{summary_text.strip()}\n\n"
+
+    if choice is None:
+        if initial_idea:
+            prompt += f"Let's begin the story based on this idea: {initial_idea}\n\nGenerate the first page."
+        else:
+            prompt += "Let's begin the story. Generate the first page."
+    else:
+        prompt += f"Continue the story following the reader's choice: '{choice}'."
+
+    return prompt
+
+
+def _generate_choices(page_text: str, model_id: Optional[str] = None) -> List[str]:
+    """Call the LLM once to produce exactly 3 reader choices based on the given page."""
+    if model_id:
+        model_config = model_manager.get_model(model_id)
+    else:
+        model_config = model_manager.get_default_model()
+
+    model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
+
+    system_prompt = (
+        "You are a creative writer crafting a choose-your-own-adventure book. "
+        "Respond strictly in valid JSON with a single key 'choices' that maps to an array of exactly 3 short, distinct reader choices for what should happen next. "
+        "Do NOT include any additional keys or commentary."
+    )
+
+    if model_config.system_prompt_modifier:
+        system_prompt += "\n\n" + model_config.system_prompt_modifier
+
+    agent = Agent(model=model_name, system_prompt=system_prompt, json_output=True, temperature=model_config.temperature or 0.8)
+
+    prompt = (
+        "Here is the most recent page of the story:\n" + page_text + "\n\nGenerate only the 'choices' JSON object."
+    )
+
+    data = agent.call(prompt)
+    return data.get("choices", [])[:3]
+
+
+@app.get("/api/story/stream")
+async def story_stream_endpoint(request: Request, book_id: Optional[str] = None, choice: Optional[str] = None, model_id: Optional[str] = None, regenerate: Optional[bool] = False):
+    """Stream the generated story page."""
+    bid = book_id or str(uuid.uuid4())
+    book = Book(bid)
+    summary_text = book.get_summary()
+
+    initial_idea = None
+    if not summary_text.strip() and choice is None:
+        initial_idea = book.book_info.settings.get("initial_idea")
+
+    prompt = _build_page_only_prompt(summary_text, choice, initial_idea)
+
+    if model_id:
+        model_config = model_manager.get_model(model_id)
+    else:
+        model_config = model_manager.get_default_model()
+
+    model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
+
+    agent = Agent(model=model_name, system_prompt="Generate only the page text without commentary.", json_output=False, temperature=model_config.temperature or 0.8)
+
+    async def event_gen():
+        page_tokens: List[str] = []
+        # Stream tokens using the helper
+        for event, data in agent.process_stream(prompt, model_config.thinking_model):
+            if await request.is_disconnected():
+                break
+            if event == "thinking":
+                yield f"event: thinking\ndata: {json.dumps({'thinking': data})}\n\n"
+            elif event == "token":
+                page_tokens.append(data)
+                safe_token = json.dumps(data)
+                yield f"data: {safe_token}\n\n"
+
+        full_page_text = "".join(page_tokens).strip()
+
+        # Save page immediately with placeholder choices to avoid commit failure
+        placeholder_choices: List[str] = []
+        if regenerate and book.pages:
+            book.replace_last_page(full_page_text, placeholder_choices, prompt, choice)
+        else:
+            book.add_page(full_page_text, placeholder_choices, prompt, choice)
+
+        # Generate choices once page is complete
+        choices_list = _generate_choices(full_page_text, model_id)
+
+        # Update page with real choices
+        book.replace_last_page(full_page_text, choices_list, prompt, choice)
+
+        yield f"event: choices\ndata: {json.dumps({'choices': choices_list})}\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
 # ====== Book management endpoints ======
 @app.get("/api/books", response_model=List[BookInfo])
@@ -255,14 +358,30 @@ async def commit_page_endpoint(book_id: str):
         if not book.book_info.pages:
             raise HTTPException(status_code=400, detail="No pages to commit")
 
-        last_page = book.book_info.pages[-1]
-        if isinstance(last_page, dict):
-            page_text = last_page["text"]
-        else:
-            page_text = last_page
-
-        book.update_summary(page_text)
+        book.regenerate_summary()
         return {"detail": "Page committed to summary"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+
+@app.patch("/api/books/{book_id}/pages/{page_index}")
+async def update_page_endpoint(book_id: str, page_index: int, body: dict = Body(...)):
+    new_text = body.get("text")
+    if new_text is None:
+        raise HTTPException(status_code=400, detail="text required")
+    try:
+        book = Book(book_id)
+        book.update_page_text(page_index, new_text)
+        return {"detail":"page updated"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Book not found")
+    except IndexError:
+        raise HTTPException(status_code=400, detail="index out of range")
+
+@app.get("/api/books/{book_id}/meta")
+async def get_book_meta(book_id: str):
+    try:
+        book = Book(book_id)
+        return book.get_meta()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Book not found")
 
@@ -281,232 +400,306 @@ async def refresh_models_endpoint():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to refresh models: {str(e)}")
 
-# ====== Streaming chat endpoint ======
+# ----------- PERSONA CHAT ENDPOINTS (previously /dialogue) --------------
+# Rename routes to /api/chat and /api/chat/stream
 
+class PersonaBase(BaseModel):
+    name: str
+    description: str = ""
+    traits: List[str] = []
 
-# Helper prompt builders ----------------------------------------------------
+class PersonaCreateRequest(PersonaBase):
+    pass
 
+class PersonaUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    traits: Optional[List[str]] = None
 
-def _build_page_only_prompt(summary_text: str, choice: Optional[str], initial_idea: Optional[str] = None) -> str:
-    """Return a prompt instructing the model to generate ONLY the next page text.
+class PersonaEnhanceRequest(PersonaBase):
+    pass
 
-    The model must **NOT** output any metadata or choices – just the prose for
-    the next page. Newlines are allowed.
-    """
-    base_prompt = (
-        "You are a creative writer helping the user craft a choose-your-own-adventure book. "
-        "Generate the next ~300-400 word page of the book ONLY. Do not include any JSON or additional commentary, just the story text."
-    )
+class DialogueRequest(BaseModel):
+    persona_id: str
+    message: str
+    conversation_id: Optional[str] = None
 
-    prompt = "\n\n" + base_prompt + "\n\n"
+class DialogueResponse(BaseModel):
+    conversation_id: str
+    reply: str
 
-    if summary_text.strip():
-        prompt += f"Book summary so far:\n{summary_text.strip()}\n\n"
+@app.post("/api/chat", response_model=DialogueResponse)
+async def chat_endpoint(req: DialogueRequest):
+    # Load persona
+    try:
+        persona = Persona(req.persona_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Persona not found")
 
-    if choice is None:
-        if initial_idea:
-            prompt += f"Let's begin the story based on this idea: {initial_idea}\n\nGenerate the first page."
-        else:
-            prompt += "Let's begin the story. Generate the first page."
+    # Load or create conversation
+    if req.conversation_id:
+        try:
+            conv = Conversation(req.conversation_id)
+        except FileNotFoundError:
+            conv = Conversation.create(req.persona_id)
     else:
-        prompt += f"Continue the story following the reader's choice: '{choice}'."
+        conv = Conversation.create(req.persona_id)
 
-    return prompt
+    # Add user message
+    conv.add_message("user", req.message)
 
+    # Build conversation history text (simple)
+    history_lines = []
+    for m in conv.messages[-10:]:
+        prefix = "User:" if m["sender"] == "user" else f"{persona.data['name']}:"
+        history_lines.append(f"{prefix} {m['text']}")
+    history_text = "\n".join(history_lines) + "\n" + f"{persona.data['name']}:"
 
-def _generate_choices(page_text: str, model_id: Optional[str] = None) -> List[str]:
-    """Call the LLM once to produce exactly 3 reader choices based on the given page."""
-    if model_id:
-        model_config = model_manager.get_model(model_id)
-    else:
-        model_config = model_manager.get_default_model()
-
+    # Call LLM
+    system_prompt = build_persona_system_prompt(persona.data)
+    model_config = model_manager.get_default_model()
     model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
 
-    # Prompt asking for choices only in JSON
-    system_prompt = (
-        "You are a creative writer crafting a choose-your-own-adventure book. "
-        "Respond strictly in valid JSON with a single key 'choices' that maps to an array of exactly 3 short, distinct reader choices for what should happen next. "
-        "Do NOT include any additional keys or commentary."
-    )
+    agent = Agent(model=model_name, system_prompt=system_prompt, json_output=False, temperature=model_config.temperature or 0.7)
 
-    if model_config.system_prompt_modifier:
-        system_prompt += "\n\n" + model_config.system_prompt_modifier
+    try:
+        reply = agent.call(history_text, max_retries=3)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail="LLM generation failed") from exc
 
-    agent = Agent(model=model_name, system_prompt=system_prompt, json_output=True, temperature=model_config.temperature or 0.8)
+    # Save AI reply
+    conv.add_message(persona.data['name'], reply)
 
-    prompt = (
-        "Here is the most recent page of the story:\n" + page_text + "\n\nGenerate only the 'choices' JSON object."
-    )
-
-    data = agent.call(prompt)
-    choices = data.get("choices", [])[:3]
-    return choices
-
+    return DialogueResponse(conversation_id=conv.id, reply=reply)
 
 @app.get("/api/chat/stream")
-async def chat_stream_endpoint(request: Request, book_id: Optional[str] = None, choice: Optional[str] = None, model_id: Optional[str] = None, regenerate: Optional[bool] = False):
-    """Stream the generated page token-by-token followed by a final JSON event with the available reader choices.
+async def chat_stream_endpoint(request: Request, persona_id: str, message: str, conversation_id: Optional[str] = None, model_id: Optional[str] = None):
+    # Load persona
+    try:
+        persona = Persona(persona_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Persona not found")
 
-    The response uses the Server-Sent Events (SSE) protocol. Regular message
-    events contain incremental page tokens. After the page has finished
-    generating, an event named ``choices`` is emitted whose data is a JSON
-    object ``{"choices": [...]}``.
-    """
-
-    # Prepare book context --------------------------------------------------
-    bid = book_id or str(uuid.uuid4())
-    book = Book(bid)
-    summary_text = book.get_summary()
-
-    initial_idea = None
-    if not summary_text.strip() and choice is None:
-        initial_idea = book.book_info.settings.get("initial_idea")
-
-    prompt = _build_page_only_prompt(summary_text, choice, initial_idea)
-
-    if model_id:
-        model_config = model_manager.get_model(model_id)
+    # Conversation handling
+    if conversation_id:
+        try:
+            conv = Conversation(conversation_id)
+        except FileNotFoundError:
+            conv = Conversation.create(persona_id)
     else:
-        model_config = model_manager.get_default_model()
+        conv = Conversation.create(persona_id)
 
+    conv.add_message("user", message)
+
+    # Build history prompt (last 10 turns)
+    history_lines = []
+    for m in conv.messages[-10:]:
+        prefix = "User:" if m["sender"] == "user" else f"{persona.data['name']}:"
+        history_lines.append(f"{prefix} {m['text']}")
+    history_text = "\n".join(history_lines) + "\n" + f"{persona.data['name']}:"
+
+    system_prompt = build_persona_system_prompt(persona.data)
+
+    model_config = model_manager.get_default_model() if not model_id else model_manager.get_model(model_id)
     model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
 
-    system_prompt = (
-        "You are a creative writer crafting a choose-your-own-adventure book. "
-        "Do NOT include any additional commentary or content to the main block - it should be a stand alone page of a book."
-    )
+    agent = Agent(model=model_name, system_prompt=system_prompt, json_output=False, temperature=model_config.temperature or 0.7)
 
-    if model_config.system_prompt_modifier:
-        system_prompt += "\n\n" + model_config.system_prompt_modifier
+    async def event_gen():
+        ai_tokens: List[str] = []
+        for event, data in agent.process_stream(history_text, model_config.thinking_model):
+            if await request.is_disconnected():
+                break
+            if event == "thinking":
+                yield f"event: thinking\ndata: {json.dumps({'thinking': data})}\n\n"
+            elif event == "token":
+                ai_tokens.append(data)
+                safe = json.dumps(data)
+                yield f"data: {safe}\n\n"
+        full_reply = "".join(ai_tokens).strip()
+        conv.add_message(persona.data['name'], full_reply)
+        yield f"event: done\ndata: {json.dumps({'conversation_id': conv.id})}\n\n"
 
-    agent = Agent(
-        model=model_name,
-        system_prompt=system_prompt,
-        json_output=False,
-        temperature=model_config.temperature or 0.8
-    )
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
 
-                                            # Streaming generator ---------------------------------------------------
-    async def event_generator():
-        page_buffer = ""
-        thinking_buffer = ""
-        in_thinking_section = False
-        in_answer_section = False
-        token_buffer = ""
-        token_queue = []  # Queue to delay token sending
+@app.get("/api/chat/{conversation_id}/messages/{msg_index}/stream")
+async def chat_regen_stream(request: Request, conversation_id: str, msg_index: int, regenerate: Optional[bool] = False, user_message: Optional[str] = None, model_id: Optional[str] = None):
+    """Stream a regenerated AI reply starting at a specific message index.
+    If regenerate=false and user_message provided, replaces the user message text before generating.
+    All conversation messages after msg_index are truncated first.
+    """
+    try:
+        conv = Conversation(conversation_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
+    if msg_index < 0 or msg_index >= len(conv.messages):
+        raise HTTPException(status_code=400, detail="msg_index out of range")
+
+    # Expect pattern: even indices user, odd indices ai; ensure index is user message
+    if conv.messages[msg_index]["sender"] != "user":
+        raise HTTPException(status_code=400, detail="msg_index must point to a user message")
+
+    # Optionally edit user message
+    if user_message is not None and not regenerate:
+        conv.messages[msg_index]["text"] = user_message.strip()
+
+    # Trim conversation after this user turn
+    conv.data["messages"] = conv.messages[: msg_index + 1]  # keep user msg
+    _save_json(conv.path, conv.data)  # persist trim
+
+    persona = Persona(conv.persona_id)
+
+    # Build history prompt again
+    history_lines = []
+    for m in conv.messages[-10:]:
+        prefix = "User:" if m["sender"] == "user" else f"{persona.data['name']}:"
+        history_lines.append(f"{prefix} {m['text']}")
+    history_text = "\n".join(history_lines) + "\n" + f"{persona.data['name']}:"
+
+    system_prompt = build_persona_system_prompt(persona.data)
+
+    model_config = model_manager.get_default_model() if not model_id else model_manager.get_model(model_id)
+    model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
+    agent = Agent(model=model_name, system_prompt=system_prompt, json_output=False, temperature=model_config.temperature or 0.7)
+
+    async def event_gen():
+        ai_tokens = []
+        for event, data in agent.process_stream(history_text, model_config.thinking_model):
+            if await request.is_disconnected():
+                break
+            if event == "thinking":
+                yield f"event: thinking\ndata: {json.dumps({'thinking': data})}\n\n"
+            elif event == "token":
+                ai_tokens.append(data)
+                yield f"data: {json.dumps(data)}\n\n"
+        full_reply = "".join(ai_tokens).strip()
+        # Append new AI message
+        conv.add_message("ai", full_reply)
+        yield f"event: done\ndata: {{}}\n\n"
+
+    return StreamingResponse(event_gen(), media_type="text/event-stream")
+
+@app.patch("/api/chat/{conversation_id}/messages/{msg_index}")
+async def patch_message(conversation_id: str, msg_index: int, body: dict = Body(...)):
+    try:
+        conv = Conversation(conversation_id)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    if msg_index <0 or msg_index>=len(conv.messages):
+        raise HTTPException(status_code=400, detail="index out of range")
+    new_text = body.get("text")
+    if new_text is None:
+        raise HTTPException(status_code=400, detail="text required")
+    conv.messages[msg_index]["text"] = new_text.strip()
+    _save_json(conv.path, conv.data)
+    return {"detail":"updated"}
+
+# ---------------- Conversation Library Endpoints -------------------------
+
+class ConversationMeta(BaseModel):
+    id: str
+    persona_id: str
+    persona_name: str
+    updated_at: str
+    last_message: Optional[str]
+
+@app.get("/api/chats", response_model=List[ConversationMeta])
+async def list_chats():
+    metas: List[ConversationMeta] = []
+    conv_dir = Path(__file__).parent.parent / "data" / "conversations"
+    for path in conv_dir.glob("*.json"):
         try:
-            for token in agent.stream(prompt):
-                # If client has disconnected, stop the generator
-                if await request.is_disconnected():
-                    break
+            conv = Conversation(path.stem)
+            persona = Persona(conv.persona_id)
+            last_message = conv.messages[-1]["text"] if conv.messages else None
+            metas.append(ConversationMeta(id=conv.id, persona_id=conv.persona_id, persona_name=persona.data.get("name"), updated_at=conv.updated_at, last_message=last_message))
+        except Exception:
+            continue
+    # Sort newest first
+    metas.sort(key=lambda m: m.updated_at or "", reverse=True)
+    return metas
 
-                # Handle thinking model tokens
-                if model_config.thinking_model:
-                    # Add token to buffer for pattern matching
-                    token_buffer += token
+@app.get("/api/chat/{conversation_id}")
+async def get_chat(conversation_id: str):
+    try:
+        conv = Conversation(conversation_id)
+        return conv.data
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Conversation not found")
 
-                    # Check for thinking section start
-                    if "<think>" in token_buffer and not in_thinking_section:
-                        in_thinking_section = True
-                        # Send thinking indicator to frontend
-                        yield f"event: thinking\ndata: {json.dumps({'thinking': True})}\n\n"
-                        # Remove the <think> tag from buffer
-                        token_buffer = token_buffer.replace("<think>", "", 1)
-                        # Clear the token queue since we're entering thinking mode
-                        token_queue.clear()
-                        continue
+# ========= Persona and Dialogue models =========
+@app.get("/api/personas")
+async def list_personas_endpoint():
+    return Persona.list_all()
 
-                                        # Check for thinking section end
-                    if "</think>" in token_buffer and in_thinking_section:
-                        in_thinking_section = False
-                        # Send thinking end indicator
-                        yield f"event: thinking\ndata: {json.dumps({'thinking': False})}\n\n"
-                        # Remove the </think> tag from buffer
-                        token_buffer = token_buffer.replace("</think>", "", 1)
-                        # Clear the token queue since we're exiting thinking mode
-                        token_queue.clear()
-                        continue
+@app.post("/api/personas", status_code=201)
+async def create_persona_endpoint(req: PersonaCreateRequest):
+    persona = Persona.create(req.name, req.description, req.traits)
+    return persona.data
 
-                    # Check for answer section start
-                    if "<answer>" in token_buffer and not in_answer_section:
-                        in_answer_section = True
-                        # Remove the <answer> tag from buffer
-                        token_buffer = token_buffer.replace("<answer>", "", 1)
-                        # Clear the token queue since we're entering answer mode
-                        token_queue.clear()
-                        continue
+@app.get("/api/personas/{persona_id}")
+async def get_persona_endpoint(persona_id: str):
+    try:
+        persona = Persona(persona_id)
+        return persona.data
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Persona not found")
 
-                    # Check for answer section end
-                    if "</answer>" in token_buffer and in_answer_section:
-                        in_answer_section = False
-                        # Remove the </answer> tag from buffer
-                        token_buffer = token_buffer.replace("</answer>", "", 1)
-                        # Clear the token queue since we're exiting answer mode
-                        token_queue.clear()
-                        continue
+@app.put("/api/personas/{persona_id}")
+async def update_persona_endpoint(persona_id: str, req: PersonaUpdateRequest):
+    try:
+        persona = Persona(persona_id)
+        updated = persona.update(req.name, req.description, req.traits)
+        return updated
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Persona not found")
 
-                    # Accumulate tokens based on current section
-                    if in_thinking_section:
-                        thinking_buffer += token
-                        # Don't send thinking tokens to frontend and don't accumulate in page_buffer
-                        continue
-                    elif in_answer_section:
-                        # Only accumulate answer tokens
-                        page_buffer += token
-                    else:
-                        # If not in any special section, accumulate normally
-                        page_buffer += token
-                else:
-                    # Non-thinking model: accumulate all tokens normally
-                    page_buffer += token
+@app.delete("/api/personas/{persona_id}")
+async def delete_persona_endpoint(persona_id: str):
+    try:
+        persona = Persona(persona_id)
+        persona.delete()
+        return {"detail": "Persona deleted"}
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Persona not found")
 
-                # Only send tokens to frontend if we're not in thinking section
-                if not (model_config.thinking_model and in_thinking_section):
-                    # For thinking models, use a delay queue to avoid sending partial tags
-                    if model_config.thinking_model:
-                        token_queue.append(token)
-                        # Send tokens with a 3-token delay to ensure we can detect complete tags
-                        if len(token_queue) >= 3:
-                            # Send the oldest token in the queue
-                            safe_token = json.dumps(token_queue.pop(0))
-                            yield f"data: {safe_token}\n\n"
-                    else:
-                        # Non-thinking model: send immediately
-                        safe_token = json.dumps(token)
-                        yield f"data: {safe_token}\n\n"
+# Stub – enhance persona via LLM (optional)
+@app.post("/api/personas/enhance")
+async def enhance_persona_endpoint(req: PersonaEnhanceRequest):
+    # For now, echo back with minor tweak
+    enhanced = {
+        "name": req.name.strip().title(),
+        "description": req.description.strip(),
+        "traits": req.traits,
+    }
+    return enhanced
 
-                        # After page finished, send any remaining tokens in the queue
-            if model_config.thinking_model and token_queue:
-                for queued_token in token_queue:
-                    safe_token = json.dumps(queued_token)
-                    yield f"data: {safe_token}\n\n"
+# ========= Dialogue/chat endpoints =========
 
-            # After page finished, generate choices ----------------------
-            # For thinking models, clean up any remaining tags and use only the answer portion
-            final_page_text = page_buffer.strip()
+def build_persona_system_prompt(pdata: dict) -> str:
+    description = pdata.get("description", "")
+    traits = ", ".join(pdata.get("traits", []))
+    base_prompt = get_prompt("chat")
+    return (
+        base_prompt + "\n\n" +
+        f"You are {pdata.get('name', 'an AI persona')}. "
+        f"{description}\n"
+        f"Traits: {traits}"
+    )
 
-            if model_config.thinking_model:
-                # Remove any remaining thinking or answer tags
-                final_page_text = final_page_text.replace("<think>", "").replace("</think>", "")
-                final_page_text = final_page_text.replace("<answer>", "").replace("</answer>", "")
-                final_page_text = final_page_text.strip()
+@app.get("/api/prompts/{mode}")
+async def get_prompt_endpoint(mode:str):
+    if mode not in ("story","chat"):
+        raise HTTPException(status_code=400, detail="mode must be story or chat")
+    return {"content": get_prompt(mode)}
 
-            choices_list = _generate_choices(final_page_text, model_id)
-
-            # Save or replace page in book (but don't update summary yet)
-            if regenerate and book.pages:
-                book.replace_last_page(final_page_text, choices_list, prompt, choice)
-            else:
-                book.add_page(final_page_text, choices_list, prompt, choice)
-            # Note: Summary is NOT updated here - it will be updated when user commits the page
-
-            # Send choices event
-            choices_json = json.dumps({"choices": choices_list, "book_id": bid})
-            yield f"event: choices\ndata: {choices_json}\n\n"
-        except Exception as exc:
-            error_json = json.dumps({"error": str(exc)})
-            yield f"event: error\ndata: {error_json}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+@app.put("/api/prompts/{mode}")
+async def set_prompt_endpoint(mode:str, body: dict = Body(...)):
+    if mode not in ("story","chat"):
+        raise HTTPException(status_code=400, detail="mode must be story or chat")
+    content = body.get("content")
+    if content is None:
+        raise HTTPException(status_code=400, detail="content required")
+    set_prompt(mode, content)
+    return {"detail":"updated"}
