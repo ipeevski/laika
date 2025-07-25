@@ -19,6 +19,29 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def load_story_prompt_file(prompt_name: str) -> str:
+    """Load a prompt from a file in the data directory."""
+    prompt_path = Path(__file__).parent.parent / "data" / "story" / "prompts" / f"{prompt_name}.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding="utf-8").strip()
+    else:
+        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+
+
+def load_chat_prompt_file(prompt_name: str) -> str:
+    """Load a chat prompt from a file in the data directory."""
+    prompt_path = Path(__file__).parent.parent / "data" / "chat" / "prompts" / f"{prompt_name}.md"
+    if prompt_path.exists():
+        return prompt_path.read_text(encoding="utf-8").strip()
+    else:
+        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+
+
+def format_prompt(template: str, **kwargs) -> str:
+    """Format a prompt template with the given parameters."""
+    return template.format(**kwargs)
+
+
 def call_llm(summary_text: str, choice: Optional[str], initial_idea: Optional[str] = None, model_id: Optional[str] = None) -> dict:
     if model_id:
         model_config = model_manager.get_model(model_id)
@@ -46,21 +69,74 @@ def call_llm(summary_text: str, choice: Optional[str], initial_idea: Optional[st
     prompt = ""
 
     if summary_text.strip():
-        prompt += f"Book summary so far:\n{summary_text.strip()}\n"
+        summary_context_template = load_story_prompt_file("summary_context")
+        prompt += format_prompt(summary_context_template, summary_text=summary_text.strip()) + "\n\n"
 
     if choice is None:
         if initial_idea:
-            prompt += f"Let's begin the story based on this idea: {initial_idea}\n\nGenerate the first page."
+            page_with_idea_template = load_story_prompt_file("page_with_idea")
+            prompt += format_prompt(page_with_idea_template, initial_idea=initial_idea)
         else:
-            prompt += "Let's begin the story. Generate the first page."
+            prompt += load_story_prompt_file("page_continuation")
     else:
-        prompt += f"Continue the story following the reader's choice: '{choice}'."
+        page_with_choice_template = load_story_prompt_file("page_with_choice")
+        prompt += format_prompt(page_with_choice_template, choice=choice)
 
     try:
         return agent.call(prompt, max_retries=3)
     except Exception as exc:  # pylint: disable=broad-except
         print("[error] LLM call failed:", exc)
         raise HTTPException(status_code=500, detail="LLM generation failed") from exc
+
+
+def generate_enhanced_summary(book: Book, model_id: Optional[str] = None) -> dict:
+    """Generate an enhanced summary using LLM to update summary, key events, and character profiles."""
+    if model_id:
+        model_config = model_manager.get_model(model_id)
+    else:
+        model_config = model_manager.get_default_model()
+
+    # Load custom summary prompt (if any)
+    summary_prompt_path = Path(__file__).parent.parent / "data" / "story" / "prompts" / "summary.md"
+
+    if summary_prompt_path.exists():
+        base_summary_prompt = summary_prompt_path.read_text(encoding="utf-8").strip()
+    else:
+        raise HTTPException(status_code=404, detail="Summary prompt not found")
+
+    # We still need structured JSON output, so append instructions
+    system_prompt = f"{base_summary_prompt}\n\n" + load_story_prompt_file("summary_with_json")
+
+    model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
+
+    agent = Agent(
+        model=model_name,
+        system_prompt=system_prompt,
+        json_output=True,
+        temperature=0.3,  # Lower temperature for more consistent analysis
+    )
+
+    # Get all page texts
+    page_texts = book.get_page_texts()
+    if not page_texts:
+        return {"summary": "", "key_events": [], "characters": []}
+
+    # Build the prompt with all story content
+    summary_analysis_template = load_story_prompt_file("summary_analysis")
+    story_content = chr(10).join(f"Page {i+1}: {text}" for i, text in enumerate(page_texts))
+    prompt = format_prompt(summary_analysis_template, story_content=story_content, current_summary=book.get_summary())
+
+    try:
+        result = agent.call(prompt, max_retries=3)
+        return result
+    except Exception as exc:
+        print(f"[error] Enhanced summary generation failed: {exc}")
+        # Fallback to basic summary
+        return {
+            "summary": "\n".join(page_texts[-3:]),  # Last 3 pages as fallback
+            "key_events": [],
+            "characters": []
+        }
 
 
 # ====== FastAPI setup ======
@@ -137,23 +213,23 @@ async def story_endpoint(req: ChatRequest):
 
 def _build_page_only_prompt(summary_text: str, choice: Optional[str], initial_idea: Optional[str] = None) -> str:
     """Return a prompt instructing the model to generate ONLY the next page text."""
-    base_prompt = (
-        "You are a creative writer helping the user craft a choose-your-own-adventure book. "
-        "Generate the next ~300-400 word page of the book ONLY. Do not include any JSON or additional commentary, just the story text."
-    )
+    base_prompt = load_story_prompt_file("page_generation")
 
     prompt = "\n\n" + base_prompt + "\n\n"
 
     if summary_text.strip():
-        prompt += f"Book summary so far:\n{summary_text.strip()}\n\n"
+        summary_context_template = load_story_prompt_file("summary_context")
+        prompt += format_prompt(summary_context_template, summary_text=summary_text.strip()) + "\n\n"
 
     if choice is None:
         if initial_idea:
-            prompt += f"Let's begin the story based on this idea: {initial_idea}\n\nGenerate the first page."
+            page_with_idea_template = load_story_prompt_file("page_with_idea")
+            prompt += format_prompt(page_with_idea_template, initial_idea=initial_idea)
         else:
-            prompt += "Let's begin the story. Generate the first page."
+            prompt += load_story_prompt_file("page_continuation")
     else:
-        prompt += f"Continue the story following the reader's choice: '{choice}'."
+        page_with_choice_template = load_story_prompt_file("page_with_choice")
+        prompt += format_prompt(page_with_choice_template, choice=choice)
 
     return prompt
 
@@ -167,20 +243,15 @@ def _generate_choices(page_text: str, model_id: Optional[str] = None) -> List[st
 
     model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
 
-    system_prompt = (
-        "You are a creative writer crafting a choose-your-own-adventure book. "
-        "Respond strictly in valid JSON with a single key 'choices' that maps to an array of exactly 3 short, distinct reader choices for what should happen next. "
-        "Do NOT include any additional keys or commentary."
-    )
+    system_prompt = load_story_prompt_file("choices_generation")
 
     if model_config.system_prompt_modifier:
         system_prompt += "\n\n" + model_config.system_prompt_modifier
 
     agent = Agent(model=model_name, system_prompt=system_prompt, json_output=True, temperature=model_config.temperature or 0.8)
 
-    prompt = (
-        "Here is the most recent page of the story:\n" + page_text + "\n\nGenerate only the 'choices' JSON object."
-    )
+    choices_prompt_template = load_story_prompt_file("choices_prompt")
+    prompt = format_prompt(choices_prompt_template, page_text=page_text)
 
     data = agent.call(prompt)
     return data.get("choices", [])[:3]
@@ -206,7 +277,7 @@ async def story_stream_endpoint(request: Request, book_id: Optional[str] = None,
 
     model_name = model_config.model_name if model_config.provider != "ollama" else f"{model_config.provider}/{model_config.model_name}"
 
-    agent = Agent(model=model_name, system_prompt="Generate only the page text without commentary.", json_output=False, temperature=model_config.temperature or 0.8)
+    agent = Agent(model=model_name, system_prompt=load_story_prompt_file("stream_page_generation"), json_output=False, temperature=model_config.temperature or 0.8)
 
     async def event_gen():
         page_tokens: List[str] = []
@@ -351,27 +422,63 @@ async def get_book_page_choice_used_endpoint(book_id: str, page_index: int):
         raise HTTPException(status_code=404, detail="Book not found")
 
 @app.post("/api/books/{book_id}/commit")
-async def commit_page_endpoint(book_id: str):
-    """Commit the last page to the summary"""
+async def commit_page_endpoint(book_id: str, model_id: Optional[str] = None):
+    """Commit the last page to the summary and generate enhanced summary with key events and character profiles"""
     try:
         book = Book(book_id)
         if not book.book_info.pages:
             raise HTTPException(status_code=400, detail="No pages to commit")
 
-        book.regenerate_summary()
-        return {"detail": "Page committed to summary"}
+        # Generate enhanced summary using LLM
+        enhanced_data = generate_enhanced_summary(book, model_id)
+
+        # Update the book with the enhanced summary, key events, and characters
+        book.book_info.summary = enhanced_data.get("summary", "")
+
+        # Update key events
+        book.book_info.key_events = enhanced_data.get("key_events", [])
+
+        # Update characters
+        book.book_info.characters = enhanced_data.get("characters", [])
+
+        # Save the updated book data
+        book._save_data()
+
+        return {
+            "detail": "Page committed to summary",
+            "summary": enhanced_data.get("summary", ""),
+            "key_events_count": len(enhanced_data.get("key_events", [])),
+            "characters_count": len(enhanced_data.get("characters", []))
+        }
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Book not found")
 
 @app.patch("/api/books/{book_id}/pages/{page_index}")
-async def update_page_endpoint(book_id: str, page_index: int, body: dict = Body(...)):
+async def update_page_endpoint(book_id: str, page_index: int, body: dict = Body(...), model_id: Optional[str] = None):
     new_text = body.get("text")
     if new_text is None:
         raise HTTPException(status_code=400, detail="text required")
     try:
         book = Book(book_id)
         book.update_page_text(page_index, new_text)
-        return {"detail":"page updated"}
+
+        # Generate enhanced summary after page update
+        enhanced_data = generate_enhanced_summary(book, model_id)
+
+        # Update the book with the enhanced summary, key events, and characters
+        book.book_info.summary = enhanced_data.get("summary", "")
+        book.book_info.key_events = enhanced_data.get("key_events", [])
+        book.book_info.characters = enhanced_data.get("characters", [])
+
+        # Save the updated book data
+        book._save_data()
+
+        return {
+            "detail": "page updated",
+            "summary": enhanced_data.get("summary", ""),
+            "key_events_count": len(enhanced_data.get("key_events", [])),
+            "characters_count": len(enhanced_data.get("characters", []))
+        }
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Book not found")
     except IndexError:
@@ -607,7 +714,7 @@ class ConversationMeta(BaseModel):
 @app.get("/api/chats", response_model=List[ConversationMeta])
 async def list_chats():
     metas: List[ConversationMeta] = []
-    conv_dir = Path(__file__).parent.parent / "data" / "conversations"
+    conv_dir = Path(__file__).parent.parent / "data" / "chat" / "conversations"
     for path in conv_dir.glob("*.json"):
         try:
             conv = Conversation(path.stem)
@@ -681,12 +788,11 @@ def build_persona_system_prompt(pdata: dict) -> str:
     description = pdata.get("description", "")
     traits = ", ".join(pdata.get("traits", []))
     base_prompt = get_prompt("chat")
-    return (
-        base_prompt + "\n\n" +
-        f"You are {pdata.get('name', 'an AI persona')}. "
-        f"{description}\n"
-        f"Traits: {traits}"
-    )
+
+    persona_template = load_chat_prompt_file("persona_template")
+    persona_part = format_prompt(persona_template, name=pdata.get('name', 'an AI persona'), description=description, traits=traits)
+
+    return base_prompt + "\n\n" + persona_part
 
 @app.get("/api/prompts/{mode}")
 async def get_prompt_endpoint(mode:str):

@@ -5,8 +5,8 @@ from typing import List, Dict, Optional
 import datetime
 
 DATA_DIR = Path(__file__).parent.parent / "data"
-PERSONA_DIR = DATA_DIR / "personas"
-CONV_DIR = DATA_DIR / "conversations"
+PERSONA_DIR = DATA_DIR / "chat" / "personas"
+CONV_DIR = DATA_DIR / "chat" / "conversations"
 
 # Ensure directories exist
 PERSONA_DIR.mkdir(parents=True, exist_ok=True)

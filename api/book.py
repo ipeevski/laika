@@ -6,7 +6,7 @@ from datetime import datetime
 import uuid
 import re
 
-BOOKS_DIR = Path("books")
+BOOKS_DIR = Path("data/story/books")
 BOOKS_DIR.mkdir(exist_ok=True)
 
 class BookInfo(BaseModel):
@@ -220,15 +220,6 @@ class Book:
     def get_summary(self) -> str:
         return self.book_info.summary
 
-    def _regenerate_summary(self):
-        """Regenerate the full book summary (placeholder implementation)."""
-        texts = [p["text"] if isinstance(p, dict) else p for p in self.book_info.pages]
-        self.book_info.summary = "\n".join(texts[-3:])  # naive: last 3 pages
-
-    def regenerate_summary(self):
-        self._regenerate_summary()
-        self._save_data()
-
     def update_page_text(self, index: int, new_text: str):
         """Replace a page's text and refresh summary placeholders."""
         if index < 0 or index >= len(self.book_info.pages):
@@ -238,9 +229,7 @@ class Book:
             page_entry["text"] = new_text
         else:
             self.book_info.pages[index] = new_text
-        # simplistic summary update – append notice
-        self.book_info.summary += f"\n[Page {index}] updated."
-        self.regenerate_summary()
+        self._save_data()
 
     def get_meta(self):
         return {

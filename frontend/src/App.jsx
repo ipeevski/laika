@@ -232,24 +232,6 @@ export default function App() {
       return
     }
 
-    // If this is a new choice (not regeneration), commit the current page first
-    if (!regenerate && pages.length > 0) {
-      try {
-        const commitRes = await fetch(`${API_BASE}/api/books/${targetBookId}/commit`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' }
-        })
-
-        if (commitRes.ok) {
-          console.log('Current page committed to summary')
-        } else {
-          console.error('Failed to commit current page')
-        }
-      } catch (err) {
-        console.error('Error committing current page:', err)
-      }
-    }
-
     setLoading(true)
 
     // Build stream URL with query params
@@ -341,6 +323,31 @@ export default function App() {
               : book
           ))
         }
+
+        // Commit the current page after streaming finishes
+        if (!regenerate && data.choices && data.choices.length > 0) {
+          const commitParams = new URLSearchParams()
+          if (currentModelId) commitParams.append('model_id', currentModelId)
+
+          fetch(`${API_BASE}/api/books/${targetBookId}/commit?${commitParams.toString()}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+          })
+            .then(async (res) => {
+              if (res.ok) {
+                const data = await res.json()
+                console.log('Current page committed to summary', data)
+                // Refresh meta data
+                await fetchMeta(targetBookId)
+              } else {
+                console.error('Failed to commit current page')
+              }
+            })
+            .catch(err => {
+              console.error('Error committing current page:', err)
+            })
+        }
+
       } catch(err) {
         console.error('Failed to parse choices event', err)
       } finally {
@@ -699,6 +706,7 @@ export default function App() {
         <BookReader
           currentBookTitle={currentBookTitle}
           currentBookId={currentBookId}
+          currentModelId={currentModelId}
           pages={pages}
           currentIndex={currentIndex}
           choices={choices}

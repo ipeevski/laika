@@ -1,0 +1,6 @@
+---
+globs: api/*.py
+alwaysApply: false
+---
+
+When using prompts, don't add them to the code. Add them to .md files instead (in the data/ directory)

@@ -1,1 +1,0 @@
-Given the original summary and the new details, update the summary to include any key information from the update

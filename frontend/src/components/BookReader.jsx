@@ -7,6 +7,8 @@ const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
 
 export default function BookReader({
   currentBookTitle,
+  currentBookId,
+  currentModelId,
   pages,
   currentIndex,
   choices,
@@ -35,7 +37,6 @@ export default function BookReader({
   onOpenSettings,
   onOpenInsights = null,
   onPageUpdated,
-  currentBookId,
 }) {
   const goPrev = () => onPageNavigation('prev')
   const goNext = () => onPageNavigation('next')
@@ -44,10 +45,15 @@ export default function BookReader({
 
   const handleSaveEdit = async (newText) => {
     try {
-      const res = await fetch(`${API_BASE}/api/books/${currentBookId}/pages/${currentIndex}`, {
+      const params = new URLSearchParams()
+      if (currentModelId) params.append('model_id', currentModelId)
+
+      const res = await fetch(`${API_BASE}/api/books/${currentBookId}/pages/${currentIndex}?${params.toString()}`, {
         method:'PATCH', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:newText})
       })
       if(res.ok){
+        const result = await res.json()
+        console.log('Page updated with enhanced summary', result)
         pages[currentIndex].text = newText
         onPageUpdated && onPageUpdated(currentIndex, newText)
         setEditing(false)

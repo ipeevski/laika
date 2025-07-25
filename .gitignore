@@ -10,6 +10,9 @@ node_modules/
 # Virtual environments
 .venv
 .env
+.deepeval
+
+data/
 
 books
 summary.md
