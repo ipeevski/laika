@@ -20,21 +20,31 @@ load_dotenv()
 
 
 def load_story_prompt_file(prompt_name: str) -> str:
-    """Load a prompt from a file in the data directory."""
+    """Load a prompt from a file in the data directory, using defaults if the file doesn't exist."""
     prompt_path = Path(__file__).parent.parent / "data" / "story" / "prompts" / f"{prompt_name}.md"
-    if prompt_path.exists():
-        return prompt_path.read_text(encoding="utf-8").strip()
-    else:
-        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+    default_path = Path(__file__).parent.parent / "prompts" / "story" / f"{prompt_name}.md"
+
+    return load_prompt_file(prompt_name, prompt_path, default_path)
 
 
 def load_chat_prompt_file(prompt_name: str) -> str:
-    """Load a chat prompt from a file in the data directory."""
+    """Load a chat prompt from a file in the data directory, using defaults if the file doesn't exist."""
     prompt_path = Path(__file__).parent.parent / "data" / "chat" / "prompts" / f"{prompt_name}.md"
+    default_path = Path(__file__).parent.parent / "prompts" / "chat" / f"{prompt_name}.md"
+
+    return load_prompt_file(prompt_name, prompt_path, default_path)
+
+def load_prompt_file(prompt_name: str, prompt_path: str, default_path: str) -> str:
     if prompt_path.exists():
         return prompt_path.read_text(encoding="utf-8").strip()
+    elif default_path.exists():
+        # Create the actual prompt file from the default
+        prompt_path.parent.mkdir(parents=True, exist_ok=True)
+        default_content = default_path.read_text(encoding="utf-8").strip()
+        prompt_path.write_text(default_content, encoding="utf-8")
+        return default_content
     else:
-        raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+        raise FileNotFoundError(f"Prompt file not found: {prompt_path} and no default at {default_path}")
 
 
 def format_prompt(template: str, **kwargs) -> str:
@@ -97,12 +107,7 @@ def generate_enhanced_summary(book: Book, model_id: Optional[str] = None) -> dic
         model_config = model_manager.get_default_model()
 
     # Load custom summary prompt (if any)
-    summary_prompt_path = Path(__file__).parent.parent / "data" / "story" / "prompts" / "summary.md"
-
-    if summary_prompt_path.exists():
-        base_summary_prompt = summary_prompt_path.read_text(encoding="utf-8").strip()
-    else:
-        raise HTTPException(status_code=404, detail="Summary prompt not found")
+    base_summary_prompt = load_story_prompt_file("summary")
 
     # We still need structured JSON output, so append instructions
     system_prompt = f"{base_summary_prompt}\n\n" + load_story_prompt_file("summary_with_json")
