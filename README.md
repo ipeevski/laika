@@ -1,30 +1,39 @@
 # Book Builder
 
-A minimal full-stack app that helps you craft a choose-your-own-adventure book with help from an Ollama large language model via [LiteLLM](https://github.com/BerriAI/litellm).
+A minimal full-stack app that helps you craft a choose-your-own-adventure book or chat with an AI companion with help from a large language model via [LiteLLM](https://github.com/BerriAI/litellm).
 
 The app delivers:
 
+## Story telling
 1. A chat-like interface that writes the next page of your story
 2. A continuously-updated `summary.md` file tracking characters & key events
-3. Three interactive choices after every page (click a button to decide!)
-4. Optional image illustrations generated through Flux
+3. Three interactive choices after every page (click a button to decide or write your custom one)
+4. Optional image illustrations (TODO)
+
+## Chat
+1. Create personas to talk with
+2. Chat with them
 
 ## Quick start
 
 ```bash
 # 1. Install deps (Python ≥ 3.12)
-uv pip install -r uv.lock  # or: pip install -e .
+uv install
 
 # 2. Point LiteLLM to your local/remote Ollama model
 export OLLAMA_MODEL="ollama/mistral"
-# Optionally configure OLLAMA_BASE_URL as well.
 
 # 3. Launch the server
-python main.py
+uv run python main.py
 # ...or uvicorn directly: uvicorn main:app --reload
 
-# 4. Open your browser
-http://localhost:8000
+# 4. Run the frontend
+cd frontend
+yarn
+yarn run dev
+
+# 5. Open your browser
+http://localhost:5173
 ```
 
 ## Adjusting the model
@@ -35,16 +44,12 @@ Set the `OLLAMA_MODEL` environment variable to whichever model you have download
 export OLLAMA_MODEL="ollama/llama3"
 ```
 
-## Image generation
-
-The `generate_image` helper calls **Flux**. Replace the stub with your preferred image generation code if necessary.
 
 ## Project layout
 
 ```
-frontend/        # static UI (TailwindCSS + vanilla JS)
-main.py          # FastAPI backend + Uvicorn entrypoint
-summary.md       # continuously updated book summary
+api/             # Python api to handle generation
+frontend/        # static UI (Bootstrap)
 pyproject.toml   # project metadata and dependencies
 ```
 
